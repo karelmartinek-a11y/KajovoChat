@@ -5,21 +5,33 @@ import queue
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 class RealtimeLogWriter:
     """
-    Almost-real-time append-only logger (text + jsonl).
-    Designed to minimize data loss on crash: frequent flushes.
+    Deterministic JSONL logger + human-readable TXT sidecar.
+
+    Goals:
+    - JSONL append-only audit trail.
+    - Deterministic ordering: every record gets a monotonic `seq`.
+    - Low data-loss risk: frequent flushes.
+
+    Notes:
+    - Determinism here means: within a single run, ordering is unambiguous via `seq`
+      (and stable JSON key ordering via `sort_keys=True`).
     """
 
     def __init__(self, log_dir: Path, session_name: str) -> None:
         self.log_dir = log_dir
         self.session_name = session_name
+
         self._q: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
+
+        self._seq_lock = threading.Lock()
+        self._seq = 0
 
         self.txt_path = self.log_dir / f"{session_name}.txt"
         self.jsonl_path = self.log_dir / f"{session_name}.jsonl"
@@ -30,7 +42,19 @@ class RealtimeLogWriter:
 
         self._thread.start()
 
+    def next_seq(self) -> int:
+        with self._seq_lock:
+            self._seq += 1
+            return self._seq
+
     def append(self, record: Dict[str, Any]) -> None:
+        # Add deterministic envelope as close to source as possible.
+        if "seq" not in record:
+            record["seq"] = self.next_seq()
+        record.setdefault("ts_wall", time.time())
+        record.setdefault("ts_mono_ns", time.monotonic_ns())
+        record.setdefault("session", self.session_name)
+
         try:
             self._q.put_nowait(record)
         except queue.Full:
@@ -71,9 +95,10 @@ class RealtimeLogWriter:
                 if line:
                     self._txt_f.write(line.rstrip() + "\n")
 
-                self._jsonl_f.write(json.dumps(item, ensure_ascii=False) + "\n")
+                # sort_keys for deterministic key order; compact separators for stability
+                self._jsonl_f.write(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
 
-            if time.time() - last_flush > 0.5:
+            if time.time() - last_flush > 0.35:
                 try:
                     self._txt_f.flush()
                     self._jsonl_f.flush()

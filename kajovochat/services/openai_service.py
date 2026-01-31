@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 import io
+import time
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional
 
 from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, APIStatusError, AuthenticationError
 
 
 StreamCallback = Callable[[str], None]
 
 
 @dataclass
-class ModelInfo:
-    id: str
+class TranscriptionResult:
+    text: str
+    language: Optional[str] = None  # e.g. "cs", "en", ...
+
+
+class InvalidApiKeyError(RuntimeError):
+    pass
 
 
 class OpenAIService:
@@ -38,70 +45,115 @@ class OpenAIService:
             ml = m.lower()
             if ml.startswith(("gpt", "o")) and "whisper" not in ml and "tts" not in ml and "audio" not in ml and "transcribe" not in ml:
                 allow.append(m)
-        # If filter became too strict, return original.
         return allow or models
 
-    def transcribe_wav(self, wav_bytes: bytes, model: str = "whisper-1", language_hint: Optional[str] = None) -> str:
+    def _with_retry(self, fn, *, op: str):
+        # Transient errors: max 1 retry with exponential backoff.
+        # Invalid key: no retry.
+        try:
+            return fn()
+        except AuthenticationError as e:
+            raise InvalidApiKeyError("Neplatný API key.") from e
+        except (APITimeoutError, APIConnectionError) as e:
+            time.sleep(0.35)
+            try:
+                return fn()
+            except Exception as e2:
+                raise RuntimeError(f"{op} selhalo (timeout/connection).") from e2
+        except APIStatusError as e:
+            status = getattr(e, "status_code", None)
+            if status in (502, 503):
+                time.sleep(0.35)
+                try:
+                    return fn()
+                except Exception as e2:
+                    raise RuntimeError(f"{op} selhalo ({status}).") from e2
+            raise
+
+    def transcribe_wav(self, wav_bytes: bytes, *, language_hint: Optional[str] = None) -> TranscriptionResult:
+        # STT is fixed to Whisper.
         bio = io.BytesIO(wav_bytes)
-        # OpenAI SDK expects a file-like with a name
         bio.name = "audio.wav"
+
         kwargs = {}
         if language_hint:
-            # e.g. "cs", "sk", "de", "en", "fr"
             kwargs["language"] = language_hint
-        tr = self.client.audio.transcriptions.create(model=model, file=bio, **kwargs)
-        return getattr(tr, "text", "") or ""
+
+        def _call():
+            return self.client.audio.transcriptions.create(model="whisper-1", file=bio, **kwargs)
+
+        tr = self._with_retry(_call, op="Přepis (Whisper)")
+        text = getattr(tr, "text", "") or ""
+
+        # language is not always present; best-effort
+        lang = getattr(tr, "language", None)
+        if isinstance(lang, str):
+            lang = lang.strip().lower() or None
+        else:
+            lang = None
+
+        return TranscriptionResult(text=text, language=lang)
 
     def chat_stream(
         self,
+        *,
         model: str,
         system_prompt: str,
         messages: List[dict],
+        temperature: float = 0.3,
+        max_output_tokens: int = 512,
         on_delta: Optional[StreamCallback] = None,
+        cancel: Optional[Callable[[], bool]] = None,
     ) -> str:
-        # Prefer Responses API if available, fallback to Chat Completions.
-        try:
-            payload = [{"role": "system", "content": system_prompt}] + messages
-            stream = self.client.chat.completions.create(
+        payload = [{"role": "system", "content": system_prompt}] + messages
+
+        def _call_stream():
+            return self.client.chat.completions.create(
                 model=model,
                 messages=payload,
+                temperature=float(temperature),
+                max_tokens=int(max_output_tokens),
                 stream=True,
             )
-            full = ""
-            for event in stream:
-                choice = event.choices[0]
-                delta = getattr(choice, "delta", None)
-                text = getattr(delta, "content", None) if delta else None
-                if text:
-                    full += text
-                    if on_delta:
-                        on_delta(text)
-            return full.strip()
-        except Exception:
-            # Fallback: non-streaming
-            payload = [{"role": "system", "content": system_prompt}] + messages
-            r = self.client.chat.completions.create(model=model, messages=payload)
-            txt = r.choices[0].message.content or ""
-            if on_delta and txt:
-                on_delta(txt)
-            return txt.strip()
+
+        stream = self._with_retry(_call_stream, op="Chat")
+
+        full = ""
+        for event in stream:
+            if cancel and cancel():
+                break
+            choice = event.choices[0]
+            delta = getattr(choice, "delta", None)
+            text = getattr(delta, "content", None) if delta else None
+            if text:
+                full += text
+                if on_delta:
+                    on_delta(text)
+
+        return full.strip()
 
     def tts_pcm16(
         self,
+        *,
         text: str,
         model: str,
         voice: str,
+        speed: float = 1.0,
         response_format: str = "pcm",
     ) -> bytes:
         if not text.strip():
             return b""
-        resp = self.client.audio.speech.create(
-            model=model,
-            voice=voice,
-            input=text,
-            response_format=response_format,
-        )
-        # SDK returns a binary response-like object
+
+        def _call():
+            return self.client.audio.speech.create(
+                model=model,
+                voice=voice,
+                input=text,
+                response_format=response_format,
+                speed=float(speed),
+            )
+
+        resp = self._with_retry(_call, op="TTS")
         data = None
         if hasattr(resp, "read"):
             data = resp.read()

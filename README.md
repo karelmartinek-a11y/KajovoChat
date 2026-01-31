@@ -2,10 +2,12 @@ KájovoChat (Windows Desktop, Python)
 
 Co to dělá
 - Fullscreen/maximalizované okno s titulkem „KájovoChat“
-- Klik na Měsíc = nonstop hlasový režim (poslech → přepis → odpověď → hlas → znovu poslech)
-- Tlačítko Zeměkoule = push‑to‑talk (jedno kolo: poslech → odpověď → hlas)
-- Titulky přepisu nad Orbem + průběžný záznam do souboru (txt + jsonl) téměř v reálném čase
-- Nastavení stylu/délky odpovědi, jazyka a pohlaví hlasu, adresáře logů, výběru modelu
+- Hands-free (výchozí): klik na Měsíc = režim „poslech → přepis (Whisper) → streamovaná odpověď → TTS → znovu poslech“
+- Push-to-talk: držím Zeměkouli a mluvím, uvolnění ukončí záznam (jedno kolo)
+- Streaming odpovědi v UI (text se zobrazuje postupně)
+- Stabilní audio playback + barge-in: během „Thinking/Speaking“ můžeš začít mluvit a tím okamžitě přerušíš přehrávání a zrušíš běžící generování
+- Deterministické auditní logy do JSONL (seq + ts_mono_ns) + čitelný TXT sidecar
+- Nastavení: jazyk konverzace (Auto/cs/en/de/sk/fr), tykání/vykání, temperature, max output tokens, hlas a rychlost TTS, styl a délka odpovědi, adresář logů, výběr chat modelu
 - OPEN AI dialog pro vložení/uložení/smazání API key
 
 Požadavky
@@ -25,17 +27,18 @@ Spuštění (1 krok)
 První nastavení
 1) Klikni OPEN AI a vlož API key → Uložit → Zavřít
 2) Klikni NASTAVENÍ:
-   - nastav styl/délku/jazyk/pohlaví
-   - vyber adresář logů
+   - vyber jazyk konverzace (Auto nebo konkrétní)
+   - nastav tykání/vykání
+   - nastav hlas a rychlost TTS
    - případně „Načíst modely“ a vyber chat model
 3) Klikni SAVE pro uložení jako výchozí
 
 Logy
 - Ukládají se do vybraného adresáře:
-  - kajovochat_YYYYMMDD_HHMMSS.txt  (čitelné)
-  - kajovochat_YYYYMMDD_HHMMSS.jsonl (strojově zpracovatelné)
+  - kajovochat_YYYYMMDD_HHMMSS.txt   (čitelné)
+  - kajovochat_YYYYMMDD_HHMMSS.jsonl (strojově zpracovatelné; deterministické pořadí přes `seq`)
 
 Poznámky
-- VAD (detekce ticha) je jednoduchá (RMS). Pokud se nahrávání ukončuje moc brzy/pozdě, uprav v kajovochat/settings.py:
-  vad_rms_threshold, vad_silence_ms.
-- Pokud se TTS nepřehraje, zkontroluj výchozí zařízení Windows nebo nastav v settings.py input_device/output_device (indexy zařízení z knihovny sounddevice).
+- Hands-free dělá krátkou kalibraci šumu při startu a dynamicky upraví práh VAD (viz `vad_calibration_s`, `vad_multiplier` v `kajovochat/settings.py`).
+- Pokud mic nejde otevřít pro barge-in monitor současně s jinou aplikací, monitor se vypne a aplikace pokračuje bez něj (bez pádu).
+- Pokud se TTS nepřehraje, zkontroluj výchozí zařízení Windows nebo nastav v settings.py `input_device`/`output_device` (indexy zařízení z knihovny sounddevice).

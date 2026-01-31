@@ -29,30 +29,135 @@ def _unmask_key(masked: str) -> str:
     return masked[::-1]
 
 
+# ---- Language / formality ----
+
+LANGUAGE_CHOICES = [
+    ("auto", "Auto"),
+    ("cs", "Čeština (cs)"),
+    ("en", "Angličtina (en)"),
+    ("de", "Němčina (de)"),
+    ("sk", "Slovenština (sk)"),
+    ("fr", "Francouzština (fr)"),
+]
+
+LANG_CODE_TO_PROMPT = {
+    "cs": "Odpovídej česky.",
+    "sk": "Odpovídej slovensky.",
+    "de": "Antworte auf Deutsch.",
+    "en": "Answer in English.",
+    "fr": "Réponds en français.",
+}
+
+
+def language_label(code: str) -> str:
+    for c, lbl in LANGUAGE_CHOICES:
+        if c == code:
+            return lbl
+    return code
+
+
+# ---- Response shaping ----
+
+STYLE_PROMPTS = {
+    "obsáhlé": "Odpovídej obsáhle, strukturovaně a s příklady, ale bez zbytečné omáčky.",
+    "věcné": "Odpovídej věcně a prakticky. Vyhni se zbytečné omáčce.",
+    "exaktní": "Odpovídej exaktně. Používej jasné definice a přesné kroky. Kde je nejistota, výslovně ji uveď.",
+    "strohé": "Odpovídej stručně a přímo, bez úvodu a bez vysvětlování, pokud to není nutné.",
+}
+
+LENGTH_PROMPTS = {
+    "krátké": "Délka odpovědi: krátká (max cca 4–6 vět, pokud to stačí).",
+    "normální": "Délka odpovědi: normální.",
+    "dlouhé": "Délka odpovědi: dlouhá (podrobně, ale stále přehledně).",
+}
+
+DETAIL_PROMPTS = {
+    "stručná": "Buď stručný. Pokud si nejsi jistý, raději se doptáš jednou otázkou.",
+    "detailní": "Buď detailnější a strukturovaný. U důležitých věcí přidej krátké odůvodnění.",
+}
+
+FORMALITY_PROMPTS = {
+    ("cs", "vykání"): "V češtině používej výhradně vykání (Vy).",
+    ("cs", "tykání"): "V češtině používej tykání (ty).",
+    ("sk", "vykání"): "V slovenčině používaj výhradne vykanie (Vy).",
+    ("sk", "tykání"): "V slovenčině používaj tykanie.",
+    ("de", "vykání"): "In Deutsch verwende die höfliche Anrede (Sie).",
+    ("de", "tykání"): "In Deutsch verwende das Du (du).",
+    ("fr", "vykání"): "En français, utilise le vouvoiement.",
+    ("fr", "tykání"): "En français, utilise le tutoiement.",
+    ("en", "vykání"): "Use a polite, professional tone (no slang).",
+    ("en", "tykání"): "Use a friendly tone, but stay respectful.",
+}
+
+
+# ---- TTS ----
+
+# The OpenAI voices list may evolve; keep a conservative, widely-available subset.
+TTS_VOICES = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]
+
+# Heuristic compatibility. This is not a claim about model limitations; it's a UX fallback list.
+LANG_TO_PREFERRED_VOICES = {
+    "cs": ["nova", "alloy", "shimmer"],
+    "sk": ["nova", "alloy", "shimmer"],
+    "de": ["onyx", "alloy", "sage"],
+    "en": ["alloy", "nova", "onyx"],
+    "fr": ["shimmer", "alloy", "coral"],
+}
+
+
+def normalize_language_code(value: str) -> str:
+    v = (value or "").strip().lower()
+    legacy = {
+        "česky": "cs",
+        "slovensky": "sk",
+        "německy": "de",
+        "anglicky": "en",
+        "francouzsky": "fr",
+        "auto": "auto",
+    }
+    if v in legacy:
+        return legacy[v]
+    if v in {"cs", "en", "de", "sk", "fr", "auto"}:
+        return v
+    # unknown: keep as-is (will behave as auto)
+    return "auto"
+
+
 @dataclass
 class AppSettings:
     # UI / behavior
-    response_style: str = "věcné"     # obsáhlé, věcné, exaktní, strohé
-    response_length: str = "normální" # krátké, normální, dlouhé
-    voice_language: str = "česky"     # česky, slovensky, německy, anglicky, francouzsky
-    voice_gender: str = "ženský"      # ženský, mužský
+    response_style: str = "věcné"       # obsáhlé, věcné, exaktní, strohé
+    response_length: str = "normální"   # krátké, normální, dlouhé
+    response_detail: str = "stručná"    # stručná, detailní
+    language: str = "auto"              # auto/cs/en/de/sk/fr
+    formality: str = "vykání"           # vykání/tykání
     log_dir: str = str((Path.home() / "Documents" / "KajovoChatLogs").resolve())
 
     # OpenAI
     openai_api_key_masked: str = ""
     chat_model: str = "gpt-4o-mini"
+    # STT is fixed to Whisper
     stt_model: str = "whisper-1"
+    # TTS defaults (keep editable)
     tts_model: str = "gpt-4o-mini-tts"
-    tts_voice_female: str = "nova"
-    tts_voice_male: str = "onyx"
+    tts_voice: str = "nova"
+    tts_speed: float = 1.0
+
+    # LLM params
+    temperature: float = 0.3
+    max_output_tokens: int = 512
 
     # audio
     input_device: Optional[int] = None
     output_device: Optional[int] = None
     input_samplerate: int = 16000
     tts_samplerate: int = 24000
-    vad_rms_threshold: float = 0.012  # tweak per mic
+
+    # VAD
+    vad_rms_threshold: float = 0.012  # base threshold (will be auto-adjusted after calibration in hands-free)
     vad_silence_ms: int = 900
+    vad_calibration_s: float = 0.7
+    vad_multiplier: float = 3.0
     max_record_seconds: int = 25
 
     @property
@@ -80,29 +185,34 @@ class AppSettings:
             s.ensure_log_dir()
             s.save()
             return s
+
         data = json.loads(p.read_text(encoding="utf-8"))
-        s = cls(**data)
+
+        # migration from older keys
+        if "voice_language" in data and "language" not in data:
+            data["language"] = normalize_language_code(data.get("voice_language", "auto"))
+        if "voice_gender" in data and "formality" not in data:
+            # old setting had no formality; default to vykání.
+            data["formality"] = "vykání"
+        if "tts_voice_female" in data and "tts_voice" not in data:
+            # preserve prior default: use female voice as generic voice
+            data["tts_voice"] = data.get("tts_voice_female") or "nova"
+
+        # enforce fixed STT model regardless of config drift
+        data["stt_model"] = "whisper-1"
+
+        s = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        s.language = normalize_language_code(s.language)
         s.ensure_log_dir()
         return s
 
 
-STYLE_PROMPTS = {
-    "obsáhlé": "Odpovídej obsáhle, strukturovaně a s příklady, ale bez zbytečné omáčky.",
-    "věcné": "Odpovídej věcně a prakticky. Vyhni se zbytečné omáčce.",
-    "exaktní": "Odpovídej exaktně. Používej jasné definice a přesné kroky. Kde je nejistota, výslovně ji uveď.",
-    "strohé": "Odpovídej stručně a přímo, bez úvodu a bez vysvětlování, pokud to není nutné.",
-}
-
-LENGTH_PROMPTS = {
-    "krátké": "Délka odpovědi: krátká (max cca 4–6 vět, pokud to stačí).",
-    "normální": "Délka odpovědi: normální.",
-    "dlouhé": "Délka odpovědi: dlouhá (podrobně, ale stále přehledně).",
-}
-
-LANGUAGE_PROMPTS = {
-    "česky": "Odpovídej česky.",
-    "slovensky": "Odpovídej slovensky.",
-    "německy": "Antworte auf Deutsch.",
-    "anglicky": "Answer in English.",
-    "francouzsky": "Réponds en français.",
-}
+def build_system_prompt(settings: AppSettings, resolved_language: str) -> str:
+    lang = resolved_language if resolved_language in LANG_CODE_TO_PROMPT else "cs"
+    lang_prompt = LANG_CODE_TO_PROMPT.get(lang, "Odpovídej česky.")
+    style = STYLE_PROMPTS.get(settings.response_style, STYLE_PROMPTS["věcné"])
+    length = LENGTH_PROMPTS.get(settings.response_length, LENGTH_PROMPTS["normální"])
+    detail = DETAIL_PROMPTS.get(settings.response_detail, DETAIL_PROMPTS["stručná"])
+    form = FORMALITY_PROMPTS.get((lang, settings.formality), "")
+    parts = [lang_prompt, form, style, length, detail]
+    return "\n".join([p for p in parts if p]).strip() + "\n"
