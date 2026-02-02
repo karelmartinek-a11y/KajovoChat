@@ -2,12 +2,12 @@ KájovoChat (Windows Desktop, Python)
 
 Co to dělá
 - Fullscreen/maximalizované okno s titulkem „KájovoChat“
-- Hands-free (výchozí): klik na Měsíc = režim „poslech → přepis (Whisper) → streamovaná odpověď → TTS → znovu poslech“
-- Push-to-talk: držím Zeměkouli a mluvím, uvolnění ukončí záznam (jedno kolo)
+- Realtime speech-to-speech přes OpenAI Realtime API (jedno stavové spojení, průběžné audio in/out)
+- Hands-free: klik na Měsíc = kontinuální streaming mikrofonu; server-side VAD rozhoduje o koncích tahů a model odpovídá automaticky
+- Push-to-talk: držím Zeměkouli a mluvím; uvolnění = commit audio + response.create
 - Streaming odpovědi v UI (text se zobrazuje postupně)
-- Stabilní audio playback + barge-in: během „Thinking/Speaking“ můžeš začít mluvit a tím okamžitě přerušíš přehrávání a zrušíš běžící generování
-- Deterministické auditní logy do JSONL (seq + ts_mono_ns) + čitelný TXT sidecar
-- Nastavení: jazyk konverzace (Auto/cs/en/de/sk/fr), tykání/vykání, temperature, max output tokens, hlas a rychlost TTS, styl a délka odpovědi, adresář logů, výběr chat modelu
+- Streaming audio playback (odpověď se přehrává průběžně)
+- Nastavení: jazyk konverzace (Auto/cs/en/de/sk/fr), tykání/vykání, hlas (voice), styl/délka odpovědi, adresář logů, výběr realtime modelu
 - OPEN AI dialog pro vložení/uložení/smazání API key
 
 Požadavky
@@ -29,8 +29,7 @@ První nastavení
 2) Klikni NASTAVENÍ:
    - vyber jazyk konverzace (Auto nebo konkrétní)
    - nastav tykání/vykání
-   - nastav hlas a rychlost TTS
-   - případně „Načíst modely“ a vyber chat model
+   - nastav hlas (voice) a realtime model (doporučeno: gpt-realtime)
 3) Klikni SAVE pro uložení jako výchozí
 
 Logy
@@ -39,6 +38,5 @@ Logy
   - kajovochat_YYYYMMDD_HHMMSS.jsonl (strojově zpracovatelné; deterministické pořadí přes `seq`)
 
 Poznámky
-- Hands-free dělá krátkou kalibraci šumu při startu a dynamicky upraví práh VAD (viz `vad_calibration_s`, `vad_multiplier` v `kajovochat/settings.py`).
-- Pokud mic nejde otevřít pro barge-in monitor současně s jinou aplikací, monitor se vypne a aplikace pokračuje bez něj (bez pádu).
-- Pokud se TTS nepřehraje, zkontroluj výchozí zařízení Windows nebo nastav v settings.py `input_device`/`output_device` (indexy zařízení z knihovny sounddevice).
+- Realtime režim očekává PCM16 mono @ 24kHz. Pokud dané audio zařízení nepodporuje 24kHz, appka se pokusí otevřít zařízení na jeho defaultní vzorkovací frekvenci (často 48kHz) a provede resampling na 24kHz (mic) / z 24kHz (playback).
+- „TTS“ v nastavení nyní znamená voice pro realtime (není to samostatné TTS volání).

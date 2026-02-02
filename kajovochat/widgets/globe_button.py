@@ -3,8 +3,10 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QTimer, Qt, QRectF, QPointF, Signal
-from PySide6.QtGui import QPainter, QPixmap, QPainterPath, QRadialGradient, QColor, QTransform
+from PySide6.QtGui import QPainter, QImage, QPainterPath, QRadialGradient, QColor
 from PySide6.QtWidgets import QPushButton
+
+from .sphere_renderer import SphereRenderer
 
 
 class GlobeButton(QPushButton):
@@ -13,15 +15,26 @@ class GlobeButton(QPushButton):
     ptt_pressed = Signal()
     ptt_released = Signal()
 
-    def __init__(self, earth_texture_path: str, parent: Optional[QPushButton] = None) -> None:
+    def __init__(
+        self,
+        earth_texture_path: str,
+        earth_clouds_path: Optional[str] = None,
+        parent: Optional[QPushButton] = None,
+    ) -> None:
         super().__init__(parent)
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedSize(94, 94)
         self.setStyleSheet("QPushButton { background: transparent; border: none; }")
 
-        self._pix = QPixmap(earth_texture_path)
+        base = QImage(earth_texture_path)
+        clouds = QImage(earth_clouds_path) if earth_clouds_path else None
+        self._renderer = SphereRenderer(base, clouds_texture=clouds)
         self._angle = 0.0
+        self._cloud_angle = 0.0
+        self._last_img = None
+        self._last_size = 0
+        self._last_angle_q = -10**9
 
         self._timer = QTimer(self)
         self._timer.setInterval(16)
@@ -29,9 +42,10 @@ class GlobeButton(QPushButton):
         self._timer.start()
 
     def _tick(self) -> None:
-        if self.isChecked():
-            self._angle = (self._angle + 0.9) % 360.0
-            self.update()
+        # Subtle idle spin; faster while pressed.
+        self._angle = (self._angle + (0.18 if not self.isChecked() else 1.05)) % 360.0
+        self._cloud_angle = (self._cloud_angle + (0.35 if not self.isChecked() else 1.65)) % 360.0
+        self.update()
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton and self.isEnabled():
@@ -77,16 +91,22 @@ class GlobeButton(QPushButton):
         circle.addEllipse(QPointF(cx, cy), r, r)
         p.setClipPath(circle)
 
-        if not self._pix.isNull():
-            pix = self._pix
-            target = QRectF(cx - r, cy - r, r * 2.0, r * 2.0)
-            tr = QTransform()
-            tr.translate(cx, cy)
-            tr.rotate(self._angle)
-            tr.translate(-cx, -cy)
-            p.setTransform(tr, True)
-            p.drawPixmap(target, pix, QRectF(0, 0, pix.width(), pix.height()))
-            p.resetTransform()
+        # Earth sphere render.
+        target = QRectF(cx - r, cy - r, r * 2.0, r * 2.0)
+        img_size = max(48, int(r * 2.0))
+
+        angle_q = int(self._angle * 2.0)  # 0.5° steps
+        if self._last_img is None or self._last_size != img_size or self._last_angle_q != angle_q:
+            self._last_img = self._renderer.render_earth(
+                img_size,
+                angle_q / 2.0,
+                clouds_angle_deg=self._cloud_angle,
+            )
+            self._last_size = img_size
+            self._last_angle_q = angle_q
+
+        if self._last_img is not None and not self._last_img.isNull():
+            p.drawImage(target, self._last_img)
 
         # border
         p.setClipping(False)

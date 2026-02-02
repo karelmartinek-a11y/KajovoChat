@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import time
+
+import httpx
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
@@ -25,7 +27,14 @@ class InvalidApiKeyError(RuntimeError):
 class OpenAIService:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key.strip()
-        self.client = OpenAI(api_key=self.api_key)
+        # Force direct OpenAI API usage (no environment proxy/base_url overrides).
+        self.base_url = "https://api.openai.com/v1"
+        self._http = httpx.Client(
+            timeout=httpx.Timeout(30.0, connect=10.0, read=30.0, write=30.0),
+            trust_env=False,
+        )
+        # Disable library-level retries; we implement a deterministic 1-retry policy.
+        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url, http_client=self._http, max_retries=0)
 
     def list_models(self) -> List[str]:
         models = self.client.models.list()
@@ -162,3 +171,10 @@ class OpenAIService:
         elif isinstance(resp, (bytes, bytearray)):
             data = bytes(resp)
         return data or b""
+
+
+    def close(self) -> None:
+        try:
+            self._http.close()
+        except Exception:
+            pass

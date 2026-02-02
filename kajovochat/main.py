@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import sys
+import queue
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+import sounddevice as sd
 
 from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot
 from PySide6.QtGui import QFont
@@ -29,8 +32,14 @@ from .settings import (
 )
 from .dialogs.settings_dialog import SettingsDialog
 from .dialogs.openai_dialog import OpenAIDialog
-from .services.openai_service import OpenAIService, InvalidApiKeyError, TranscriptionResult
-from .services.audio_service import AudioRecorder, AudioPlayer, VADMonitor, RecordResult
+from .services.openai_service import OpenAIService
+from .services.audio_service import (
+    AudioPlayer,
+    RealtimeMicStream,
+    pick_audio_device,
+    format_device_help,
+)
+from .services.realtime_service import RealtimeConfig, RealtimeService
 from .services.log_service import RealtimeLogWriter
 from .widgets.orb_widget import OrbWidget
 from .widgets.globe_button import GlobeButton
@@ -68,43 +77,75 @@ def _resolve_tts_voice(lang: str, preferred: str) -> Tuple[str, Optional[str]]:
 
 
 class ConversationWorker(QObject):
-    """End-to-end voice conversation pipeline.
+    """Realtime speech-to-speech conversation (WebSocket).
 
-    Runs in a dedicated QThread. All slow operations (audio + network) are outside GUI thread.
+    The UI has two modes:
+    - Hands-free: continuous mic streaming, server-side VAD triggers responses.
+    - Push-to-talk: mic streams only while button is pressed; on release we commit+response.
     """
 
-    state_changed = Signal(str)        # idle/listening/transcribing/thinking/speaking/error
+    state_changed = Signal(str)        # idle/listening/thinking/speaking/error
     captions_updated = Signal(str)     # full captions text to show
     error = Signal(str)               # safe UI error message
-
-    # PTT recording emits RecordResult from a separate thread
-    ptt_record_done = Signal(object)  # RecordResult
 
     def __init__(self, settings: AppSettings) -> None:
         super().__init__()
         self.settings = settings
 
-        # global stop for current session
         self._stop_all = threading.Event()
 
-        # per-turn cancellation (barge-in / user interrupt)
-        self._turn_cancel = threading.Event()
-
-        # PTT recording control
-        self._ptt_stop: Optional[threading.Event] = None
-        self._ptt_thread: Optional[threading.Thread] = None
-
-        # context
-        self._messages: List[dict] = []
         self._captions = ""
         self._logger: Optional[RealtimeLogWriter] = None
-        self._last_lang: Optional[str] = None
-
-        # current audio player (so we can stop immediately on barge-in)
         self._player: Optional[AudioPlayer] = None
-        self._player_lock = threading.Lock()
+        self._resolved_input_device: Optional[int] = None
+        self._resolved_output_device: Optional[int] = None
 
-        self.ptt_record_done.connect(self._on_ptt_record_done)
+        self._rt: Optional[RealtimeService] = None
+        self._rt_loop_stop = threading.Event()
+        self._rt_loop_thread: Optional[threading.Thread] = None
+
+        self._mic: Optional[RealtimeMicStream] = None
+        self._mic_enabled = threading.Event()
+
+        self._mode: str = "idle"  # "handsfree" | "ptt" | "idle"
+        self._resolved_lang = "cs"
+
+    def _ensure_player(self) -> None:
+        if self._player is not None:
+            return
+        self._player = AudioPlayer(samplerate=24000, device=self._resolved_output_device)
+
+    def _resolve_audio_devices(self) -> None:
+        """Pick stable defaults for laptop mic + speakers.
+
+        Users can override in Settings. If Settings points to an invalid device,
+        we fall back to system default, then heuristic choice.
+        """
+        in_dev, in_note = pick_audio_device("input", self.settings.input_device)
+        out_dev, out_note = pick_audio_device("output", self.settings.output_device)
+        self._resolved_input_device = in_dev
+        self._resolved_output_device = out_dev
+
+        # Best-effort show chosen device names (for troubleshooting).
+        try:
+            in_name = sd.query_devices(in_dev, "input")["name"] if in_dev is not None else "default"
+        except Exception:
+            in_name = "(neznámé)"
+        try:
+            out_name = sd.query_devices(out_dev, "output")["name"] if out_dev is not None else "default"
+        except Exception:
+            out_name = "(neznámé)"
+        self._append_caption(f"Mic: {in_dev if in_dev is not None else 'Default'} – {in_name}")
+        self._append_caption(f"Spk: {out_dev if out_dev is not None else 'Default'} – {out_name}")
+
+        # Surface auto-selection in captions so troubleshooting is simple.
+        notes = []
+        if in_note != "selected:settings":
+            notes.append(f"mic:{in_note}")
+        if out_note != "selected:settings":
+            notes.append(f"spk:{out_note}")
+        if notes:
+            self._append_caption("Audio: " + ", ".join(notes))
 
     def _append_caption(self, line: str) -> None:
         self._captions = (self._captions + "\n" + line).strip()
@@ -122,40 +163,24 @@ class ConversationWorker(QObject):
         log_dir = self.settings.ensure_log_dir()
         session_name = datetime.now().strftime("kajovochat_%Y%m%d_%H%M%S")
         self._logger = RealtimeLogWriter(log_dir=log_dir, session_name=session_name)
-        self._messages = []
         self._captions = ""
         self.captions_updated.emit(self._captions)
 
-        self._logger.append({
-            "type": "session_start",
-            "settings": {
-                "response_style": self.settings.response_style,
-                "response_length": self.settings.response_length,
-                "response_detail": self.settings.response_detail,
-                "language": self.settings.language,
-                "formality": self.settings.formality,
-                "chat_model": self.settings.chat_model,
-                "stt_model": self.settings.stt_model,  # fixed to whisper-1
-                "tts_model": self.settings.tts_model,
-                "tts_voice": self.settings.tts_voice,
-                "tts_speed": self.settings.tts_speed,
-                "temperature": self.settings.temperature,
-                "max_output_tokens": self.settings.max_output_tokens,
-                "audio": {
-                    "input_device": self.settings.input_device,
-                    "output_device": self.settings.output_device,
-                    "input_samplerate": self.settings.input_samplerate,
-                    "tts_samplerate": self.settings.tts_samplerate,
-                },
-                "vad": {
-                    "vad_rms_threshold": self.settings.vad_rms_threshold,
-                    "vad_silence_ms": self.settings.vad_silence_ms,
-                    "vad_calibration_s": self.settings.vad_calibration_s,
-                    "vad_multiplier": self.settings.vad_multiplier,
-                    "max_record_seconds": self.settings.max_record_seconds,
+        self._logger.append(
+            {
+                "type": "session_start",
+                "settings": {
+                    "openai_base_url": "wss://api.openai.com/v1/realtime",
+                    "realtime_model": self.settings.realtime_model,
+                    "language": self.settings.language,
+                    "tts_voice": self.settings.tts_voice,
+                    "audio": {
+                        "input_device": self.settings.input_device,
+                        "output_device": self.settings.output_device,
+                    },
                 },
             }
-        })
+        )
 
     def _end_session(self) -> None:
         if not self._logger:
@@ -167,330 +192,242 @@ class ConversationWorker(QObject):
             pass
         self._logger = None
 
-    def _stop_playback_immediately(self) -> None:
-        with self._player_lock:
-            p = self._player
-        if p:
+    def _ensure_realtime(self, turn_mode: str) -> RealtimeService:
+        if not self.settings.openai_api_key:
+            raise ValueError("Chybí API key")
+
+        # Language used for instructions + transcription hint.
+        resolved = self.settings.language if self.settings.language in _ALLOWED_LANGS else "cs"
+        if resolved == "auto":
+            resolved = "cs"
+        self._resolved_lang = resolved
+
+        instructions = build_system_prompt(self.settings, resolved)
+
+        # Keep within current Realtime constraints (speed max is 1.5).
+        try:
+            speed = float(self.settings.tts_speed)
+        except Exception:
+            speed = 1.0
+        speed = max(0.25, min(1.5, speed))
+
+        cfg = RealtimeConfig(
+            api_key=self.settings.openai_api_key,
+            model=self.settings.realtime_model,
+            instructions=instructions,
+            voice=self.settings.tts_voice,
+            language_hint=resolved if self.settings.language != "auto" else "auto",
+            turn_mode=turn_mode,
+            auto_interrupt=True,
+            noise_reduction="far_field",
+            output_speed=speed,
+            server_vad_silence_ms=int(self.settings.vad_silence_ms or 900),
+            server_vad_prefix_ms=300,
+            server_vad_threshold=0.60,
+        )
+
+        if self._rt is None:
+            self._rt = RealtimeService(cfg)
+            self._wire_realtime_callbacks(self._rt)
+            self._rt.connect()
+            return self._rt
+
+        # Same websocket; update session settings.
+        # Update extra audio/session knobs as well (update_session only touches a subset).
+        self._rt.cfg.noise_reduction = "far_field"
+        self._rt.cfg.output_speed = speed
+        self._rt.cfg.server_vad_silence_ms = int(self.settings.vad_silence_ms or 900)
+        self._rt.cfg.server_vad_prefix_ms = 300
+        self._rt.cfg.server_vad_threshold = 0.60
+        self._rt.update_session(
+            instructions=instructions,
+            voice=self.settings.tts_voice,
+            language_hint=cfg.language_hint,
+            turn_mode=turn_mode,
+        )
+        return self._rt
+
+    def _wire_realtime_callbacks(self, rt: RealtimeService) -> None:
+        rt.on_status = lambda s: self._append_caption(s)
+
+        def _err(msg: str) -> None:
+            if self._logger:
+                self._logger.append({"type": "error", "message": msg})
+            self.state_changed.emit("error")
+            self.error.emit(msg)
+
+        rt.on_error = _err
+
+        def _user(t: str) -> None:
+            self._append_caption(f"Ty: {t}")
+            if self._logger:
+                self._logger.append({"type": "user", "text": t})
+
+        rt.on_user_transcript = _user
+
+        rt.on_assistant_text_delta = lambda d: self._set_caption_preview("AI", d)
+
+        def _ai_done(t: str) -> None:
+            self._append_caption(f"AI: {t}")
+            if self._logger:
+                self._logger.append({"type": "assistant", "text": t})
+
+        rt.on_assistant_text_done = _ai_done
+
+        def _audio(pcm: bytes) -> None:
+            # Audio deltas arrive faster than realtime; enqueue and let the player drain.
+            self.state_changed.emit("speaking")
             try:
-                p.stop()
+                self._ensure_player()
+                if self._player:
+                    self._player.enqueue_pcm16(pcm)
+            except Exception as e:
+                # If playback fails (wrong output device), surface a helpful error.
+                _err(str(e) + "\n\n" + format_device_help())
+
+        rt.on_assistant_audio_delta = _audio
+
+        def _speech_started() -> None:
+            # Barge-in: stop local playback immediately.
+            try:
+                if self._player:
+                    self._player.stop()
             except Exception:
                 pass
+            self.state_changed.emit("listening")
 
-    def _cancel_current_turn(self, reason: str) -> None:
-        self._turn_cancel.set()
-        self._stop_playback_immediately()
-        if self._logger:
-            self._logger.append({"type": "turn_cancel", "reason": reason})
+        rt.on_vad_speech_started = _speech_started
+
+        def _resp_done() -> None:
+            # In handsfree mode we keep listening; in PTT return to idle.
+            if self._mode == "handsfree":
+                self.state_changed.emit("listening")
+            else:
+                self.state_changed.emit("idle")
+
+        rt.on_response_done = _resp_done
+
+    def _start_rt_loop(self) -> None:
+        if self._rt_loop_thread and self._rt_loop_thread.is_alive():
+            return
+        self._rt_loop_stop.clear()
+
+        def loop() -> None:
+            while not self._rt_loop_stop.is_set():
+                if self._rt:
+                    self._rt.pump_events()
+                if self._mic_enabled.is_set() and self._mic is not None and self._rt is not None:
+                    # Drain a few chunks per tick to reduce backlog.
+                    for _ in range(6):
+                        try:
+                            chunk = self._mic.queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        if chunk:
+                            self._rt.append_audio_pcm16(chunk)
+                time.sleep(0.005)
+
+        self._rt_loop_thread = threading.Thread(target=loop, daemon=True)
+        self._rt_loop_thread.start()
 
     @Slot()
     def request_stop(self) -> None:
-        # stop everything
         self._stop_all.set()
-        self._cancel_current_turn("request_stop")
-        if self._ptt_stop:
-            self._ptt_stop.set()
+        self._mode = "idle"
+        self._mic_enabled.clear()
+        try:
+            if self._mic:
+                self._mic.stop()
+        except Exception:
+            pass
+        try:
+            if self._player:
+                self._player.stop()
+        except Exception:
+            pass
+        self._player = None
+        try:
+            if self._rt:
+                self._rt.close()
+        except Exception:
+            pass
+        self._rt = None
+        self._rt_loop_stop.set()
+        self.state_changed.emit("idle")
+        self._end_session()
 
     # -------- Hands-free mode --------
 
     @Slot()
     def start_handsfree(self) -> None:
-        if not self.settings.openai_api_key:
-            self.error.emit("Chybí API key. Otevři OPEN AI a vlož API key.")
-            return
-
-        self._stop_all.clear()
-        self._turn_cancel.clear()
-        self._start_session_if_needed()
-
-        self._append_caption("Hands-free: aktivní.")
-
-        self._run_handsfree_loop()
-
-    def _run_handsfree_loop(self) -> None:
-        svc = OpenAIService(self.settings.openai_api_key)
-        recorder = AudioRecorder(
-            samplerate=self.settings.input_samplerate,
-            device=self.settings.input_device,
-            rms_threshold=self.settings.vad_rms_threshold,
-            silence_ms=self.settings.vad_silence_ms,
-            max_seconds=self.settings.max_record_seconds,
-        )
-
-        # noise calibration
-        threshold = float(self.settings.vad_rms_threshold)
         try:
-            noise = recorder.calibrate_noise(seconds=float(self.settings.vad_calibration_s))
-            threshold = max(threshold, float(noise) * float(self.settings.vad_multiplier))
-            if self._logger:
-                self._logger.append({
-                    "type": "handsfree_calibration",
-                    "noise_rms": float(noise),
-                    "vad_threshold": float(threshold),
-                })
+            self._start_session_if_needed()
+            self._mode = "handsfree"
+            self._resolve_audio_devices()
+            if self._resolved_input_device is None or self._resolved_output_device is None:
+                raise RuntimeError("Nenalezen mikrofon nebo výstupní zařízení.\n\n" + format_device_help())
+            self._ensure_player()
+            rt = self._ensure_realtime("server_vad")
+            self._start_rt_loop()
+            self._mic = RealtimeMicStream(samplerate=24000, device=self._resolved_input_device)
+            self._mic.start()
+            if getattr(self._mic, "using_resampler", False):
+                self._append_caption(
+                    f"Mikrofon jede na {self._mic.input_samplerate} Hz, resampluji na 24000 Hz."
+                )
+            self._mic_enabled.set()
+            self.state_changed.emit("listening")
+            self._append_caption("Hands-free: Realtime aktivní (server VAD).")
         except Exception as e:
-            if self._logger:
-                self._logger.append({"type": "handsfree_calibration_error", "error": str(e)})
+            self.state_changed.emit("error")
+            self.error.emit(str(e))
 
-        try:
-            while not self._stop_all.is_set():
-                self._turn_cancel.clear()
-                self.state_changed.emit("listening")
-
-                try:
-                    rec = recorder.record_handsfree(cancel=self._stop_all, threshold=threshold)
-                except Exception as e:
-                    self.state_changed.emit("error")
-                    self.error.emit(f"Nepodařilo se nahrát mikrofon: {e}")
-                    return
-
-                if self._stop_all.is_set():
-                    return
-
-                if self._logger:
-                    self._logger.append({
-                        "type": "audio_recorded",
-                        "mode": "handsfree",
-                        "duration_s": rec.duration_s,
-                        "rms_median": rec.rms_median,
-                    })
-
-                ok = self._process_turn(svc=svc, wav_bytes=rec.wav_bytes, mode="handsfree")
-                if not ok:
-                    # On error/cancel in a single turn, continue listening unless stop_all.
-                    if self._stop_all.is_set():
-                        return
-
-        finally:
-            self.state_changed.emit("idle")
-            self._end_session()
-
-    # -------- PTT mode (hold-to-speak) --------
 
     @Slot()
     def ptt_pressed(self) -> None:
-        if not self.settings.openai_api_key:
-            self.error.emit("Chybí API key. Otevři OPEN AI a vlož API key.")
+        if self._mode == "handsfree":
             return
+        try:
+            self._start_session_if_needed()
+            self._mode = "ptt"
+            self._resolve_audio_devices()
+            if self._resolved_input_device is None or self._resolved_output_device is None:
+                raise RuntimeError("Nenalezen mikrofon nebo výstupní zařízení.\n\n" + format_device_help())
+            self._ensure_player()
+            rt = self._ensure_realtime("ptt")
+            self._start_rt_loop()
+            rt.clear_input_audio()
+            self._mic = RealtimeMicStream(samplerate=24000, device=self._resolved_input_device)
+            self._mic.start()
+            if getattr(self._mic, "using_resampler", False):
+                self._append_caption(
+                    f"Mikrofon jede na {self._mic.input_samplerate} Hz, resampluji na 24000 Hz."
+                )
+            self._mic_enabled.set()
+            self.state_changed.emit("listening")
+            self._append_caption("PTT: poslouchám…")
+        except Exception as e:
+            self.state_changed.emit("error")
+            self.error.emit(str(e))
 
-        # barge-in by design: start speaking => cancel current output immediately
-        self._cancel_current_turn("ptt_pressed")
-
-        self._stop_all.clear()
-        self._turn_cancel.clear()
-        self._start_session_if_needed()
-
-        # if a recording is already running, ignore
-        if self._ptt_thread and self._ptt_thread.is_alive():
-            return
-
-        self.state_changed.emit("listening")
-        self._append_caption("PTT: mluvte…")
-
-        self._ptt_stop = threading.Event()
-        recorder = AudioRecorder(
-            samplerate=self.settings.input_samplerate,
-            device=self.settings.input_device,
-            rms_threshold=self.settings.vad_rms_threshold,
-            silence_ms=self.settings.vad_silence_ms,
-            max_seconds=self.settings.max_record_seconds,
-        )
-
-        def _rec() -> None:
-            try:
-                rr = recorder.record_ptt(stop_event=self._ptt_stop, cancel=self._stop_all)
-            except Exception as e:
-                # push error to UI thread via signal
-                self.error.emit(f"Nepodařilo se nahrát mikrofon (PTT): {e}")
-                self.state_changed.emit("error")
-                return
-            self.ptt_record_done.emit(rr)
-
-        self._ptt_thread = threading.Thread(target=_rec, name="PTTRecorder", daemon=True)
-        self._ptt_thread.start()
 
     @Slot()
     def ptt_released(self) -> None:
-        if self._ptt_stop:
-            self._ptt_stop.set()
-
-    @Slot(object)
-    def _on_ptt_record_done(self, rec: RecordResult) -> None:
-        if self._stop_all.is_set():
+        if self._mode != "ptt":
             return
-        if self._logger:
-            self._logger.append({
-                "type": "audio_recorded",
-                "mode": "ptt",
-                "duration_s": rec.duration_s,
-                "rms_median": rec.rms_median,
-            })
-        svc = OpenAIService(self.settings.openai_api_key)
-        self._turn_cancel.clear()
-        self._process_turn(svc=svc, wav_bytes=rec.wav_bytes, mode="ptt")
-
-    # -------- Core pipeline --------
-
-    def _process_turn(self, *, svc: OpenAIService, wav_bytes: bytes, mode: str) -> bool:
-        """Run STT -> LLM(stream) -> TTS -> playback. Returns True if completed."""
+        if not self._rt:
+            return
+        self._mic_enabled.clear()
         try:
-            self.state_changed.emit("transcribing")
-
-            lang_hint = None if self.settings.language == "auto" else self.settings.language
-            tr: TranscriptionResult
-            try:
-                tr = svc.transcribe_wav(wav_bytes, language_hint=lang_hint)
-            except InvalidApiKeyError:
-                self.state_changed.emit("error")
-                self.error.emit("Neplatný API key. Otevři OPEN AI a vlož správný klíč.")
-                return False
-            except Exception as e:
-                self.state_changed.emit("error")
-                self.error.emit(f"Přepis (Whisper) selhal: {e}")
-                return False
-
-            user_text = (tr.text or "").strip()
-            stt_lang = (tr.language or None)
-            resolved_lang = _resolve_language(self.settings, stt_lang, self._last_lang)
-            self._last_lang = resolved_lang
-
-            if self._logger:
-                self._logger.append({
-                    "type": "stt_result",
-                    "mode": mode,
-                    "text": user_text,
-                    "language_hint": lang_hint,
-                    "detected_language": stt_lang,
-                    "resolved_language": resolved_lang,
-                })
-
-            if not user_text or self._turn_cancel.is_set() or self._stop_all.is_set():
-                return False
-
-            self._append_caption(f"Ty: {user_text}")
-            if self._logger:
-                self._logger.append({"type": "user_text", "text": user_text, "text_line": f"Ty: {user_text}"})
-
-            self._messages.append({"role": "user", "content": user_text})
-            self._messages = self._messages[-20:]
-
-            self.state_changed.emit("thinking")
-
-            assistant_acc = ""
-
-            def on_delta(d: str) -> None:
-                nonlocal assistant_acc
-                assistant_acc += d
-                self._set_caption_preview("AI", assistant_acc)
-
-            # Start barge-in monitor for this turn (thinking + speaking)
-            vad_threshold = max(0.012, float(self.settings.vad_rms_threshold) * 1.7)
-            monitor = VADMonitor(
-                samplerate=self.settings.input_samplerate,
-                device=self.settings.input_device,
-                threshold=vad_threshold,
-                trigger_ms=140,
-            )
-            monitor.start(lambda rms: self._cancel_current_turn("barge_in"))
-
-            assistant_text = ""
-            try:
-                assistant_text = svc.chat_stream(
-                    model=self.settings.chat_model,
-                    system_prompt=build_system_prompt(self.settings, resolved_language=resolved_lang),
-                    messages=self._messages,
-                    temperature=float(self.settings.temperature),
-                    max_output_tokens=int(self.settings.max_output_tokens),
-                    on_delta=on_delta,
-                    cancel=lambda: self._turn_cancel.is_set() or self._stop_all.is_set(),
-                )
-            except InvalidApiKeyError:
-                monitor.stop()
-                self.state_changed.emit("error")
-                self.error.emit("Neplatný API key. Otevři OPEN AI a vlož správný klíč.")
-                return False
-            except Exception as e:
-                monitor.stop()
-                if self._turn_cancel.is_set():
-                    return False
-                self.state_changed.emit("error")
-                self.error.emit(f"Chat selhal: {e}")
-                return False
-
-            if self._turn_cancel.is_set() or self._stop_all.is_set():
-                monitor.stop()
-                return False
-
-            assistant_text = (assistant_text or "").strip()
-            if assistant_text:
-                self._messages.append({"role": "assistant", "content": assistant_text})
-                self._messages = self._messages[-20:]
-                self._append_caption(f"AI: {assistant_text}")
-                if self._logger:
-                    self._logger.append({"type": "assistant_text", "text": assistant_text, "text_line": f"AI: {assistant_text}"})
-
-            # TTS voice fallback + warning
-            voice, fallback_reason = _resolve_tts_voice(resolved_lang, self.settings.tts_voice)
-            if fallback_reason:
-                self._append_caption(f"(TTS) Použit fallback hlas: {voice}")
-                if self._logger:
-                    self._logger.append({"type": "tts_voice_fallback", "reason": fallback_reason, "resolved_voice": voice})
-
-            self.state_changed.emit("speaking")
-
-            pcm = b""
-            try:
-                pcm = svc.tts_pcm16(
-                    text=assistant_text,
-                    model=self.settings.tts_model,
-                    voice=voice,
-                    speed=float(self.settings.tts_speed),
-                    response_format="pcm",
-                )
-            except InvalidApiKeyError:
-                monitor.stop()
-                self.state_changed.emit("error")
-                self.error.emit("Neplatný API key. Otevři OPEN AI a vlož správný klíč.")
-                return False
-            except Exception as e:
-                monitor.stop()
-                if self._turn_cancel.is_set():
-                    return False
-                self.state_changed.emit("error")
-                self.error.emit(f"TTS selhalo: {e}")
-                return False
-
-            if self._logger:
-                self._logger.append({"type": "tts_bytes", "nbytes": len(pcm), "voice": voice, "speed": float(self.settings.tts_speed)})
-
-            if self._turn_cancel.is_set() or self._stop_all.is_set():
-                monitor.stop()
-                return False
-
-            # playback (stable buffering) with cancel
-            player = AudioPlayer(samplerate=self.settings.tts_samplerate, device=self.settings.output_device)
-            with self._player_lock:
-                self._player = player
-            try:
-                player.play_pcm16(pcm, cancel=self._turn_cancel)
-            finally:
-                with self._player_lock:
-                    self._player = None
-                try:
-                    player.stop()
-                except Exception:
-                    pass
-
-            monitor.stop()
-            self.state_changed.emit("idle")
-            return True
-
-        except Exception as e:
-            # No unhandled exceptions should crash the app.
-            if self._logger:
-                self._logger.append({"type": "unhandled_exception", "error": str(e)})
-            self.state_changed.emit("error")
-            self.error.emit("Nastala neočekávaná chyba. Zkus to prosím znovu.")
-            return False
+            if self._mic:
+                self._mic.stop()
+        except Exception:
+            pass
+        # Commit input audio and ask for a response.
+        self.state_changed.emit("thinking")
+        self._rt.commit_input_audio()
+        self._rt.request_response()
+        self._append_caption("PTT: čekám na odpověď…")
 
 
 class MainWindow(QMainWindow):
@@ -560,12 +497,13 @@ class MainWindow(QMainWindow):
 
         moon_path = str(Path(__file__).resolve().parent / "resources" / "assets" / "moon_hd.png")
         earth_path = str(Path(__file__).resolve().parent / "resources" / "assets" / "earth_hd.png")
+        earth_clouds_path = str(Path(__file__).resolve().parent / "resources" / "assets" / "earth_clouds_hd.png")
 
         self.orb = OrbWidget(moon_path)
         self.orb.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.orb.setMinimumSize(520, 520)
 
-        self.globe = GlobeButton(earth_path)
+        self.globe = GlobeButton(earth_path, earth_clouds_path)
 
         center.addStretch(1)
         center.addWidget(self.orb, 0, Qt.AlignHCenter)
@@ -575,7 +513,18 @@ class MainWindow(QMainWindow):
 
         outer.addLayout(center, 1)
 
-        root.setStyleSheet("QWidget { background-color: #0b0f18; } QPushButton { padding: 8px 14px; }")  # noqa: E501
+        root.setStyleSheet(
+            "QWidget { background-color: #0b0f18; color: #f2f2f2; }"
+            " QLabel { color: rgba(245,245,245,210); }"
+            " QGroupBox { border: 1px solid rgba(255,255,255,35); border-radius: 8px; margin-top: 10px; }"
+            " QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: rgba(245,245,245,220); }"
+            " QLineEdit, QComboBox { background-color: rgba(255,255,255,18); border: 1px solid rgba(255,255,255,55); border-radius: 6px; padding: 6px 8px; color: #f2f2f2; }"
+            " QComboBox::drop-down { border: none; }"
+            " QPushButton { padding: 8px 14px; color: #f2f2f2; background-color: rgba(255,255,255,22); border: 1px solid rgba(255,255,255,65); border-radius: 6px; }"
+            " QPushButton:hover { background-color: rgba(255,255,255,30); }"
+            " QPushButton:pressed { background-color: rgba(255,255,255,40); }"
+            " QPushButton:disabled { color: rgba(245,245,245,120); background-color: rgba(255,255,255,10); border-color: rgba(255,255,255,25); }"
+        )
 
     def _wire(self) -> None:
         self.btn_exit.clicked.connect(self.close)
@@ -680,6 +629,19 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
+    # Ensure buttons/inputs are readable on dark background across all dialogs.
+    app.setStyleSheet(
+        "QWidget { background-color: #0b0f18; color: #f2f2f2; }"
+        " QLabel { color: rgba(245,245,245,210); }"
+        " QGroupBox { border: 1px solid rgba(255,255,255,35); border-radius: 8px; margin-top: 10px; }"
+        " QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: rgba(245,245,245,220); }"
+        " QLineEdit, QComboBox { background-color: rgba(255,255,255,18); border: 1px solid rgba(255,255,255,55); border-radius: 6px; padding: 6px 8px; color: #f2f2f2; }"
+        " QComboBox::drop-down { border: none; }"
+        " QPushButton { padding: 8px 14px; color: #f2f2f2; background-color: rgba(255,255,255,22); border: 1px solid rgba(255,255,255,65); border-radius: 6px; }"
+        " QPushButton:hover { background-color: rgba(255,255,255,30); }"
+        " QPushButton:pressed { background-color: rgba(255,255,255,40); }"
+        " QPushButton:disabled { color: rgba(245,245,245,120); background-color: rgba(255,255,255,10); border-color: rgba(255,255,255,25); }"
+    )
     w = MainWindow()
     w.show()
     sys.exit(app.exec())

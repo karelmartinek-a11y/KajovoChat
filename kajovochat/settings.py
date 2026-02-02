@@ -92,16 +92,16 @@ FORMALITY_PROMPTS = {
 
 # ---- TTS ----
 
-# The OpenAI voices list may evolve; keep a conservative, widely-available subset.
-TTS_VOICES = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]
+# Konzervativní seznam oficiálně podporovaných hlasů Realtime TTS (2026-02-02).
+TTS_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
 
-# Heuristic compatibility. This is not a claim about model limitations; it's a UX fallback list.
+# Heuristické preference podle jazyka.
 LANG_TO_PREFERRED_VOICES = {
-    "cs": ["nova", "alloy", "shimmer"],
-    "sk": ["nova", "alloy", "shimmer"],
-    "de": ["onyx", "alloy", "sage"],
-    "en": ["alloy", "nova", "onyx"],
-    "fr": ["shimmer", "alloy", "coral"],
+    "cs": ["alloy", "echo", "shimmer"],
+    "sk": ["alloy", "echo", "shimmer"],
+    "de": ["sage", "alloy", "ash"],
+    "en": ["alloy", "ash", "verse"],
+    "fr": ["coral", "marin", "alloy"],
 }
 
 
@@ -136,11 +136,13 @@ class AppSettings:
     # OpenAI
     openai_api_key_masked: str = ""
     chat_model: str = "gpt-4o-mini"
+    # Realtime voice
+    realtime_model: str = "gpt-realtime"
     # STT is fixed to Whisper
     stt_model: str = "whisper-1"
     # TTS defaults (keep editable)
     tts_model: str = "gpt-4o-mini-tts"
-    tts_voice: str = "nova"
+    tts_voice: str = "alloy"
     tts_speed: float = 1.0
 
     # LLM params
@@ -203,6 +205,20 @@ class AppSettings:
 
         s = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
         s.language = normalize_language_code(s.language)
+        # normalize TTS hlas na aktuální podporovaný seznam
+        legacy_map = {
+            "fable": "alloy",
+            "nova": "alloy",
+            "onyx": "alloy",
+        }
+        v = (s.tts_voice or "").strip()
+        v = legacy_map.get(v, v)
+        if v not in TTS_VOICES:
+            pref = LANG_TO_PREFERRED_VOICES.get(s.language, [])
+            v = pref[0] if pref else TTS_VOICES[0]
+        elif s.language in LANG_TO_PREFERRED_VOICES and v not in LANG_TO_PREFERRED_VOICES[s.language]:
+            v = LANG_TO_PREFERRED_VOICES[s.language][0]
+        s.tts_voice = v
         s.ensure_log_dir()
         return s
 

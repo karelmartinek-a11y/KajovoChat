@@ -5,8 +5,10 @@ import time
 from typing import Optional
 
 from PySide6.QtCore import QTimer, Qt, QRectF, QPointF, Signal
-from PySide6.QtGui import QPainter, QPixmap, QPainterPath, QRadialGradient, QColor, QTransform, QFont
+from PySide6.QtGui import QPainter, QImage, QPainterPath, QRadialGradient, QColor, QFont
 from PySide6.QtWidgets import QWidget
+
+from .sphere_renderer import SphereRenderer
 
 
 class OrbWidget(QWidget):
@@ -17,7 +19,13 @@ class OrbWidget(QWidget):
         self.setAttribute(Qt.WA_OpaquePaintEvent, False)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
-        self._pix = QPixmap(moon_texture_path)
+        moon_img = QImage(moon_texture_path)
+        self._renderer = SphereRenderer(moon_img)
+
+        # Render cache (avoid realloc churn).
+        self._last_img: Optional[QImage] = None
+        self._last_size: int = 0
+        self._last_angle_q: int = -10**9
         self._state = "idle"
         self._running = False  # nonstop mode on/off
 
@@ -100,20 +108,19 @@ class OrbWidget(QWidget):
         p.setBrush(shadow)
         p.drawEllipse(QPointF(cx + rr*0.08, cy + rr*0.12), rr * 1.05, rr * 1.05)
 
-        circle = QPainterPath()
-        circle.addEllipse(QPointF(cx, cy), rr, rr)
-        p.setClipPath(circle)
+        # --- Moon (physically shaded sphere) ---
+        target = QRectF(cx - rr, cy - rr, rr * 2.0, rr * 2.0)
+        img_size = max(64, int(rr * 2.0))
 
-        if not self._pix.isNull():
-            pix = self._pix
-            target = QRectF(cx - rr, cy - rr, rr * 2.0, rr * 2.0)
-            tr = QTransform()
-            tr.translate(cx, cy)
-            tr.rotate(self._angle)
-            tr.translate(-cx, -cy)
-            p.setTransform(tr, True)
-            p.drawPixmap(target, pix, QRectF(0, 0, pix.width(), pix.height()))
-            p.resetTransform()
+        # Quantize angle to reduce unnecessary rerenders.
+        angle_q = int(self._angle * 2.0)  # 0.5° steps
+        if self._last_img is None or self._last_size != img_size or self._last_angle_q != angle_q:
+            self._last_img = self._renderer.render_moon(img_size, angle_q / 2.0)
+            self._last_size = img_size
+            self._last_angle_q = angle_q
+
+        if self._last_img is not None and not self._last_img.isNull():
+            p.drawImage(target, self._last_img)
 
         # vignette
         vign = QRadialGradient(QPointF(cx - rr*0.25, cy - rr*0.25), rr * 1.35)
