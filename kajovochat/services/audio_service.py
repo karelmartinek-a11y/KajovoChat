@@ -349,6 +349,10 @@ class AudioPlayer:
         self._stream: Optional[sd.OutputStream] = None
         self._closed = False
 
+        # Approximate current playback level (0..1). Updated in the audio
+        # callback thread; read from UI/worker threads.
+        self._level: float = 0.0
+
     def _ensure_stream(self) -> None:
         if self._stream:
             return
@@ -380,6 +384,7 @@ class AudioPlayer:
 
             if not chunk:
                 outdata[:] = 0
+                self._level = 0.0
                 return
 
             pcm = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
@@ -388,6 +393,15 @@ class AudioPlayer:
                 padded[: pcm.shape[0]] = pcm
                 pcm = padded
             outdata[:, 0] = pcm
+
+            # Track output loudness for UI (orb animation). Keep this lightweight.
+            try:
+                rms = float(np.sqrt(np.mean(pcm * pcm) + 1e-12))
+                peak = float(np.max(np.abs(pcm))) if pcm.size else 0.0
+                lvl = max(rms * 1.8, peak * 1.0)
+                self._level = float(max(0.0, min(1.0, lvl)))
+            except Exception:
+                self._level = 0.0
 
         last_err: Optional[Exception] = None
         for rate in try_rates:
@@ -429,6 +443,14 @@ class AudioPlayer:
 
         with self._lock:
             self._closed = False
+        self._level = 0.0
+
+    def get_level(self) -> float:
+        """Return approximate current playback level in range 0..1."""
+        try:
+            return float(self._level)
+        except Exception:
+            return 0.0
 
     def enqueue_pcm16(self, pcm_bytes: bytes) -> None:
         if not pcm_bytes:

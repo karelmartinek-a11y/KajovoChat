@@ -1,0 +1,20 @@
+{"seq":1,"session":"kajovochat_20260203_202421","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime","tts_voice":"cedar"},"ts_mono_ns":530051140000000,"ts_wall":1770146661.27438,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260203_202421","text":"Ahoj, podívájme se na ty snídeně, kolik máme zítra snídení, je 24.3.","ts_mono_ns":530061234000000,"ts_wall":1770146671.363263,"type":"user"}
+{"seq":3,"session":"kajovochat_20260203_202421","text":"Ahoj, než ti to povím, potřebuju ověřit tvoje jméno a heslo. Jaké je tvoje jméno a heslo?","ts_mono_ns":530061984000000,"ts_wall":1770146672.1167262,"type":"assistant"}
+{"seq":4,"session":"kajovochat_20260203_202421","text":"jméno a heslo.","ts_mono_ns":530066578000000,"ts_wall":1770146676.7158067,"type":"user"}
+{"seq":5,"session":"kajovochat_20260203_202421","text":"Potřebuju, abys mi řekl jméno a heslo, abych tě mohl ověřit. Prosím, řekni mi je.","ts_mono_ns":530068218000000,"ts_wall":1770146678.3428237,"type":"assistant"}
+{"seq":6,"session":"kajovochat_20260203_202421","text":"Jasně, stačí mi te","ts_mono_ns":530070500000000,"ts_wall":1770146680.6310315,"type":"assistant"}
+{"seq":7,"session":"kajovochat_20260203_202421","text":"Aby jsme se kvůli mé...","ts_mono_ns":530070906000000,"ts_wall":1770146681.0295022,"type":"user"}
+{"seq":8,"session":"kajovochat_20260203_202421","text":"Není se karávná.","ts_mono_ns":530073062000000,"ts_wall":1770146683.1982446,"type":"user"}
+{"seq":9,"session":"kajovochat_20260203_202421","text":"Rozumím, ale pořád tě musím ověřit. Jaké je tvoje jméno a heslo?","ts_mono_ns":530073343000000,"ts_wall":1770146683.4666932,"type":"assistant"}
+{"seq":10,"session":"kajovochat_20260203_202421","text":"No a hezlo.","ts_mono_ns":530078437000000,"ts_wall":1770146688.563739,"type":"user"}
+{"seq":11,"session":"kajovochat_20260203_202421","text":"Bez ověření ti nemůžu poskytnout informace. Prosím, řekni mi nejdřív svoje jméno a heslo podle seznamu.","ts_mono_ns":530079718000000,"ts_wall":1770146689.8449965,"type":"assistant"}
+{"seq":12,"session":"kajovochat_20260203_202421","text":"Slyši mě.","ts_mono_ns":530084562000000,"ts_wall":1770146694.69957,"type":"user"}
+{"seq":13,"session":"kajovochat_20260203_202421","text":"Potřebuju přesné heslo z našeho seznamu. Řekni prosím svoje jméno a správné heslo, jinak ti nemůžu pomoct.","ts_mono_ns":530085796000000,"ts_wall":1770146695.9317362,"type":"assistant"}
+{"seq":14,"session":"kajovochat_20260203_202421","text":"Omlouvám se, ale bez správného","ts_mono_ns":530090578000000,"ts_wall":1770146700.7048624,"type":"assistant"}
+{"seq":15,"session":"kajovochat_20260203_202421","text":"prosím svoje mé...","ts_mono_ns":530091015000000,"ts_wall":1770146701.1486988,"type":"user"}
+{"seq":16,"session":"kajovochat_20260203_202421","text":"Karel a žárovka","ts_mono_ns":530093406000000,"ts_wall":1770146703.5337365,"type":"user"}
+{"seq":17,"session":"kajovochat_20260203_202421","text":"Tvoje jméno ani heslo nesouhlasí s naším seznamem. Potřebuju správné jméno a heslo, která jsou na seznamu. Zkus to prosím znovu.","ts_mono_ns":530094234000000,"ts_wall":1770146704.3610377,"type":"assistant"}
+{"seq":18,"session":"kajovochat_20260203_202421","text":"Děkuji s ním znovu.","ts_mono_ns":530103046000000,"ts_wall":1770146713.1795876,"type":"user"}
+{"seq":19,"session":"kajovochat_20260203_202421","text":"Jsem tu, abych ti pomohl, ale opravdu tě musím nejdřív ověřit. Prosím, řekni mi jméno a heslo přesně podle seznamu. Pak se hned podívám na ty snídaně.","ts_mono_ns":530103953000000,"ts_wall":1770146714.0863063,"type":"assistant"}
+{"seq":20,"session":"kajovochat_20260203_202421","ts_mono_ns":530107093000000,"ts_wall":1770146717.2307923,"type":"session_end"}

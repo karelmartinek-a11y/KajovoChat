@@ -1,0 +1,12 @@
+{"seq":1,"session":"kajovochat_20260203_201537","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime-mini","tts_voice":"alloy"},"ts_mono_ns":529527687000000,"ts_wall":1770146137.805578,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260203_201537","text":"Ahoj.","ts_mono_ns":529531218000000,"ts_wall":1770146141.3413582,"type":"user"}
+{"seq":3,"session":"kajovochat_20260203_201537","text":"Ahoj, rád tě slyším. Než ti pomůžu, potřebuju ověřit identitu. Jak se jmenuješ a jaké je heslo?","ts_mono_ns":529531796000000,"ts_wall":1770146141.919047,"type":"assistant"}
+{"seq":4,"session":"kajovochat_20260203_201537","text":"Takže několik bude s ní denní, zítra?","ts_mono_ns":529536296000000,"ts_wall":1770146146.417656,"type":"user"}
+{"seq":5,"session":"kajovochat_20260203_201537","text":"Jasně, nejdřív se ale musíme ověřit. Jaké je tvoje jméno a heslo?","ts_mono_ns":529536593000000,"ts_wall":1770146146.7077792,"type":"assistant"}
+{"seq":6,"session":"kajovochat_20260203_201537","text":"Adriana Kankovská žárovka","ts_mono_ns":529544015000000,"ts_wall":1770146154.1319208,"type":"user"}
+{"seq":7,"session":"kajovochat_20260203_201537","text":"Ahoj Adriano, to jsem rád, že slyším! Jak si vzpomínáš na tu naše poslední dovolenou u moře? Teď ti hned řeknu, co máme zítra k snídani. Můžeš mi potvrdit, jestli chceš vědět typy snídaně pro konkrétní pokoj?","ts_mono_ns":529545046000000,"ts_wall":1770146155.1616907,"type":"assistant"}
+{"seq":8,"session":"kajovochat_20260203_201537","text":"Nechci větpotštěnce.","ts_mono_ns":529558750000000,"ts_wall":1770146168.8749833,"type":"user"}
+{"seq":9,"session":"kajovochat_20260203_201537","text":"Dobře, děkuju za potvrzení. Teď mi prosím řekni, o který pokoj a datum jde – ať to můžu najít ve správných datech.","ts_mono_ns":529559078000000,"ts_wall":1770146169.195198,"type":"assistant"}
+{"seq":10,"session":"kajovochat_20260203_201537","text":"Zdravím vám.","ts_mono_ns":529568453000000,"ts_wall":1770146178.566784,"type":"user"}
+{"seq":11,"session":"kajovochat_20260203_201537","text":"Děkuju, pořád ještě potřebuju vědět, na jaký pokoj a datum se chceš podívat. Můžeš mi to upřesnit?","ts_mono_ns":529568890000000,"ts_wall":1770146179.0166712,"type":"assistant"}
+{"seq":12,"session":"kajovochat_20260203_201537","ts_mono_ns":529570671000000,"ts_wall":1770146180.7935529,"type":"session_end"}

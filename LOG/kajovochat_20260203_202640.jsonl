@@ -1,0 +1,15 @@
+{"seq":1,"session":"kajovochat_20260203_202640","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime","tts_voice":"alloy"},"ts_mono_ns":530190609000000,"ts_wall":1770146800.7408576,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260203_202640","text":"Ahoj, pro","ts_mono_ns":530196875000000,"ts_wall":1770146807.010659,"type":"assistant"}
+{"seq":3,"session":"kajovochat_20260203_202640","text":"Děkujeme.","ts_mono_ns":530197250000000,"ts_wall":1770146807.385383,"type":"user"}
+{"seq":4,"session":"kajovochat_20260203_202640","text":"Můžete jít na němec.","ts_mono_ns":530198453000000,"ts_wall":1770146808.5812244,"type":"user"}
+{"seq":5,"session":"kajovochat_20260203_202640","text":"Potřebuji nejdřív ověřit tvoji identitu. Řekni","ts_mono_ns":530199171000000,"ts_wall":1770146809.3053923,"type":"assistant"}
+{"seq":6,"session":"kajovochat_20260203_202640","text":"Čau.","ts_mono_ns":530201031000000,"ts_wall":1770146811.1674168,"type":"user"}
+{"seq":7,"session":"kajovochat_20260203_202640","text":"Ahoj, abych ti mohl pomoct, potřebuju ověřit tvoji identitu. Prosím, řekni svoje jméno a heslo.","ts_mono_ns":530202203000000,"ts_wall":1770146812.33127,"type":"assistant"}
+{"seq":8,"session":"kajovochat_20260203_202640","text":"A to bylo obvězit.","ts_mono_ns":530206031000000,"ts_wall":1770146816.1640182,"type":"user"}
+{"seq":9,"session":"kajovochat_20260203_202640","text":"Jasně. Řekni prosím svoje jméno a heslo, ať tě můžu ověřit","ts_mono_ns":530206921000000,"ts_wall":1770146817.0613348,"type":"assistant"}
+{"seq":10,"session":"kajovochat_20260203_202640","text":"Jasně.","ts_mono_ns":530208218000000,"ts_wall":1770146818.3443496,"type":"user"}
+{"seq":11,"session":"kajovochat_20260203_202640","text":"Než budeme pokračovat, potřebuju znát tvo","ts_mono_ns":530208687000000,"ts_wall":1770146818.819032,"type":"assistant"}
+{"seq":12,"session":"kajovochat_20260203_202640","text":"Moc mi to sešlo.","ts_mono_ns":530211187000000,"ts_wall":1770146821.3245783,"type":"user"}
+{"message":"Connection to remote host was lost.","seq":13,"session":"kajovochat_20260203_202640","ts_mono_ns":531642906000000,"ts_wall":1770148253.0392463,"type":"error"}
+{"message":"socket is already closed.","seq":14,"session":"kajovochat_20260203_202640","ts_mono_ns":531642921000000,"ts_wall":1770148253.057325,"type":"error"}
+{"message":"socket is already closed.","seq":15,"session":"kajovochat_20260203_202640","ts_mono_ns":531642921000000,"ts_wall":1770148253.057325,"type":"error"}

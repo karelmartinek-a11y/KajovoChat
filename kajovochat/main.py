@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple
 import sounddevice as sd
 
 from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -41,8 +41,10 @@ from .services.audio_service import (
 )
 from .services.realtime_service import RealtimeConfig, RealtimeService
 from .services.log_service import RealtimeLogWriter
+from .services.app_logging import install_app_logging
 from .widgets.orb_widget import OrbWidget
 from .widgets.globe_button import GlobeButton
+from .theme import Theme, app_stylesheet
 
 
 _ALLOWED_LANGS = {"cs", "en", "de", "sk", "fr"}
@@ -84,9 +86,13 @@ class ConversationWorker(QObject):
     - Push-to-talk: mic streams only while button is pressed; on release we commit+response.
     """
 
-    state_changed = Signal(str)        # idle/listening/thinking/speaking/error
+    state_changed = Signal(str)        # idle/listening/transcribing/thinking/speaking/error
     captions_updated = Signal(str)     # full captions text to show
     error = Signal(str)               # safe UI error message
+
+    # Real-time levels for orb animation (0..1).
+    input_level = Signal(float)
+    output_level = Signal(float)
 
     def __init__(self, settings: AppSettings) -> None:
         super().__init__()
@@ -109,6 +115,40 @@ class ConversationWorker(QObject):
 
         self._mode: str = "idle"  # "handsfree" | "ptt" | "idle"
         self._resolved_lang = "cs"
+
+        # Level signals are throttled to avoid saturating the Qt event loop.
+        self._last_in_level: float = 0.0
+        self._last_out_level: float = 0.0
+        self._last_level_emit_t: float = 0.0
+
+        # True while waiting for server transcription completion.
+        self._awaiting_transcript = False
+
+        # Best-effort current UI state.
+        self._ui_state = "idle"
+
+    def _set_state(self, s: str) -> None:
+        self._ui_state = s
+        self.state_changed.emit(s)
+
+    @staticmethod
+    def _pcm16_level(pcm: bytes) -> float:
+        """Quick 0..1 loudness estimate from PCM16 mono bytes."""
+        if not pcm:
+            return 0.0
+        try:
+            import numpy as _np
+
+            x = _np.frombuffer(pcm, dtype=_np.int16).astype(_np.float32)
+            if x.size == 0:
+                return 0.0
+            x = x / 32768.0
+            rms = float(_np.sqrt(_np.mean(x * x) + 1e-12))
+            peak = float(_np.max(_np.abs(x)))
+            lvl = max(rms * 2.2, peak * 1.1)
+            return float(max(0.0, min(1.0, lvl)))
+        except Exception:
+            return 0.0
 
     def _ensure_player(self) -> None:
         if self._player is not None:
@@ -226,7 +266,8 @@ class ConversationWorker(QObject):
             server_vad_threshold=0.60,
         )
 
-        if self._rt is None:
+        if self._rt is None or not self._rt.is_connected:
+            # Znovu vytvorit websocket po odpojeni.
             self._rt = RealtimeService(cfg)
             self._wire_realtime_callbacks(self._rt)
             self._rt.connect()
@@ -253,7 +294,8 @@ class ConversationWorker(QObject):
         def _err(msg: str) -> None:
             if self._logger:
                 self._logger.append({"type": "error", "message": msg})
-            self.state_changed.emit("error")
+            self._stop_realtime_session()
+            self._set_state("error")
             self.error.emit(msg)
 
         rt.on_error = _err
@@ -262,6 +304,11 @@ class ConversationWorker(QObject):
             self._append_caption(f"Ty: {t}")
             if self._logger:
                 self._logger.append({"type": "user", "text": t})
+
+            # Transition from "transcribing" to "thinking" once we have a transcript.
+            self._awaiting_transcript = False
+            if self._ui_state not in {"speaking", "error"}:
+                self._set_state("thinking")
 
         rt.on_user_transcript = _user
 
@@ -276,7 +323,7 @@ class ConversationWorker(QObject):
 
         def _audio(pcm: bytes) -> None:
             # Audio deltas arrive faster than realtime; enqueue and let the player drain.
-            self.state_changed.emit("speaking")
+            self._set_state("speaking")
             try:
                 self._ensure_player()
                 if self._player:
@@ -294,16 +341,26 @@ class ConversationWorker(QObject):
                     self._player.stop()
             except Exception:
                 pass
-            self.state_changed.emit("listening")
+            self._awaiting_transcript = False
+            self._set_state("listening")
 
         rt.on_vad_speech_started = _speech_started
+
+        def _speech_stopped() -> None:
+            # Server will emit input_audio_transcription.completed afterwards.
+            self._awaiting_transcript = True
+            # In handsfree, the server will auto-create the response (create_response=True).
+            self._set_state("transcribing")
+
+        rt.on_vad_speech_stopped = _speech_stopped
 
         def _resp_done() -> None:
             # In handsfree mode we keep listening; in PTT return to idle.
             if self._mode == "handsfree":
-                self.state_changed.emit("listening")
+                self._set_state("listening")
             else:
-                self.state_changed.emit("idle")
+                self._set_state("idle")
+            self._awaiting_transcript = False
 
         rt.on_response_done = _resp_done
 
@@ -316,6 +373,8 @@ class ConversationWorker(QObject):
             while not self._rt_loop_stop.is_set():
                 if self._rt:
                     self._rt.pump_events()
+
+                # Mic streaming + input level.
                 if self._mic_enabled.is_set() and self._mic is not None and self._rt is not None:
                     # Drain a few chunks per tick to reduce backlog.
                     for _ in range(6):
@@ -324,11 +383,63 @@ class ConversationWorker(QObject):
                         except queue.Empty:
                             break
                         if chunk:
+                            # Update last input VU level.
+                            self._last_in_level = self._pcm16_level(chunk)
                             self._rt.append_audio_pcm16(chunk)
+
+                # Output level from the audio callback (reflects actual playback).
+                if self._player is not None:
+                    try:
+                        self._last_out_level = float(self._player.get_level())
+                    except Exception:
+                        self._last_out_level = 0.0
+                else:
+                    self._last_out_level = 0.0
+
+                # Throttle signals to ~60Hz.
+                now = time.time()
+                if now - self._last_level_emit_t >= 0.016:
+                    in_lvl = self._last_in_level if self._mic_enabled.is_set() else 0.0
+                    out_lvl = self._last_out_level
+                    self.input_level.emit(float(in_lvl))
+                    self.output_level.emit(float(out_lvl))
+                    self._last_level_emit_t = now
                 time.sleep(0.005)
 
         self._rt_loop_thread = threading.Thread(target=loop, daemon=True)
         self._rt_loop_thread.start()
+
+    def _stop_rt_loop(self, *, timeout_s: float = 1.0) -> None:
+        self._rt_loop_stop.set()
+        t = self._rt_loop_thread
+        if t and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=timeout_s)
+        self._rt_loop_thread = None
+
+    def _stop_realtime_session(self) -> None:
+        self._mic_enabled.clear()
+        try:
+            if self._mic:
+                self._mic.stop()
+        except Exception:
+            pass
+        self._mic = None
+        try:
+            if self._player:
+                self._player.stop()
+        except Exception:
+            pass
+        self._player = None
+        try:
+            if self._rt:
+                self._rt.close()
+        except Exception:
+            pass
+        self._rt = None
+        self._stop_rt_loop()
+        self._mode = "idle"
+        self._awaiting_transcript = False
+        self._end_session()
 
     @Slot()
     def request_stop(self) -> None:
@@ -352,8 +463,10 @@ class ConversationWorker(QObject):
         except Exception:
             pass
         self._rt = None
-        self._rt_loop_stop.set()
-        self.state_changed.emit("idle")
+        self._stop_rt_loop()
+        self.input_level.emit(0.0)
+        self.output_level.emit(0.0)
+        self._set_state("idle")
         self._end_session()
 
     # -------- Hands-free mode --------
@@ -376,10 +489,10 @@ class ConversationWorker(QObject):
                     f"Mikrofon jede na {self._mic.input_samplerate} Hz, resampluji na 24000 Hz."
                 )
             self._mic_enabled.set()
-            self.state_changed.emit("listening")
+            self._set_state("listening")
             self._append_caption("Hands-free: Realtime aktivní (server VAD).")
         except Exception as e:
-            self.state_changed.emit("error")
+            self._set_state("error")
             self.error.emit(str(e))
 
 
@@ -404,10 +517,10 @@ class ConversationWorker(QObject):
                     f"Mikrofon jede na {self._mic.input_samplerate} Hz, resampluji na 24000 Hz."
                 )
             self._mic_enabled.set()
-            self.state_changed.emit("listening")
+            self._set_state("listening")
             self._append_caption("PTT: poslouchám…")
         except Exception as e:
-            self.state_changed.emit("error")
+            self._set_state("error")
             self.error.emit(str(e))
 
 
@@ -424,7 +537,9 @@ class ConversationWorker(QObject):
         except Exception:
             pass
         # Commit input audio and ask for a response.
-        self.state_changed.emit("thinking")
+        # We show "transcribing" until the server emits the transcript.
+        self._awaiting_transcript = True
+        self._set_state("transcribing")
         self._rt.commit_input_audio()
         self._rt.request_response()
         self._append_caption("PTT: čekám na odpověď…")
@@ -436,9 +551,9 @@ class MainWindow(QMainWindow):
     sig_ptt_pressed = Signal()
     sig_ptt_released = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, settings) -> None:
         super().__init__()
-        self.settings = AppSettings.load()
+        self.settings = settings
         self._handsfree_running = False
 
         self._thread = QThread(self)
@@ -451,7 +566,18 @@ class MainWindow(QMainWindow):
         self.sig_ptt_pressed.connect(self.worker.ptt_pressed)
         self.sig_ptt_released.connect(self.worker.ptt_released)
 
-        self.setWindowTitle("KájovoChat")
+        self._theme = Theme()
+
+        # Window branding
+        self.setWindowTitle("Chatbot Kája")
+        try:
+            assets_dir = Path(__file__).resolve().parent / "resources" / "assets"
+            icon_path = assets_dir / "logo_chatbot_kaja.png"
+            if icon_path.exists():
+                self.setWindowIcon(QIcon(str(icon_path)))
+        except Exception:
+            pass
+
         self._build_ui()
         self._wire()
         self.showMaximized()
@@ -461,35 +587,73 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         outer = QVBoxLayout()
-        outer.setContentsMargins(16, 12, 16, 12)
+        outer.setContentsMargins(18, 14, 18, 16)
         root.setLayout(outer)
 
-        title = QLabel("KájovoChat")
-        f = QFont()
-        f.setPointSize(22)
-        f.setBold(True)
-        title.setFont(f)
-        title.setAlignment(Qt.AlignHCenter)
-        outer.addWidget(title)
+        # --- Header (brand + quick actions) ---
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
 
-        row = QHBoxLayout()
-        self.btn_settings = QPushButton("NASTAVENÍ")
-        self.btn_openai = QPushButton("OPEN AI")
-        self.btn_save = QPushButton("SAVE")
-        self.btn_exit = QPushButton("EXIT")
+        logo = QLabel()
+        logo.setFixedSize(56, 56)
+        try:
+            assets_dir = Path(__file__).resolve().parent / "resources" / "assets"
+            logo_path = assets_dir / "logo_chatbot_kaja.png"
+            if logo_path.exists():
+                pm = QPixmap(str(logo_path))
+                logo.setPixmap(pm.scaled(56, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except Exception:
+            pass
 
-        row.addWidget(self.btn_settings)
-        row.addWidget(self.btn_openai)
-        row.addWidget(self.btn_save)
-        row.addStretch(1)
-        row.addWidget(self.btn_exit)
-        outer.addLayout(row)
+        title_wrap = QVBoxLayout()
+        title_wrap.setSpacing(0)
+        title = QLabel("Chatbot Kája")
+        tf = QFont()
+        tf.setPointSize(22)
+        tf.setBold(True)
+        title.setFont(tf)
+        title.setStyleSheet(f"QLabel {{ color: {self._theme.text}; }}")
+        subtitle = QLabel("Hlasový asistent (hands‑free / push‑to‑talk)")
+        subtitle.setStyleSheet(f"QLabel {{ color: {self._theme.text_muted}; font-size: 12px; }}")
+        title_wrap.addWidget(title)
+        title_wrap.addWidget(subtitle)
 
+        header.addWidget(logo)
+        header.addSpacing(12)
+        header.addLayout(title_wrap)
+        header.addStretch(1)
+
+        self.btn_settings = QPushButton("Nastavení")
+        self.btn_openai = QPushButton("OpenAI")
+        self.btn_save = QPushButton("Uložit")
+        self.btn_exit = QPushButton("Konec")
+
+        self.btn_settings.setProperty("variant", "primary")
+        self.btn_exit.setProperty("variant", "danger")
+
+        header.addWidget(self.btn_openai)
+        header.addWidget(self.btn_settings)
+        header.addWidget(self.btn_save)
+        header.addSpacing(8)
+        header.addWidget(self.btn_exit)
+
+        outer.addLayout(header)
+
+        # Captions/status panel
         self.captions = QLabel("")
-        self.captions.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        self.captions.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.captions.setWordWrap(True)
-        self.captions.setStyleSheet("QLabel { color: rgba(245,245,245,210); font-size: 14px; }")
-        self.captions.setMinimumHeight(110)
+        self.captions.setMinimumHeight(120)
+        self.captions.setStyleSheet(
+            "QLabel {"
+            "  padding: 12px 14px;"
+            "  border-radius: 14px;"
+            "  background-color: rgba(255,255,255,6);"
+            "  border: 1px solid rgba(255,255,255,16);"
+            "  font-size: 13px;"
+            "  line-height: 1.2;"
+            "}"
+        )
         outer.addWidget(self.captions)
 
         center = QVBoxLayout()
@@ -513,32 +677,24 @@ class MainWindow(QMainWindow):
 
         outer.addLayout(center, 1)
 
-        root.setStyleSheet(
-            "QWidget { background-color: #0b0f18; color: #f2f2f2; }"
-            " QLabel { color: rgba(245,245,245,210); }"
-            " QGroupBox { border: 1px solid rgba(255,255,255,35); border-radius: 8px; margin-top: 10px; }"
-            " QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: rgba(245,245,245,220); }"
-            " QLineEdit, QComboBox { background-color: rgba(255,255,255,18); border: 1px solid rgba(255,255,255,55); border-radius: 6px; padding: 6px 8px; color: #f2f2f2; }"
-            " QComboBox::drop-down { border: none; }"
-            " QPushButton { padding: 8px 14px; color: #f2f2f2; background-color: rgba(255,255,255,22); border: 1px solid rgba(255,255,255,65); border-radius: 6px; }"
-            " QPushButton:hover { background-color: rgba(255,255,255,30); }"
-            " QPushButton:pressed { background-color: rgba(255,255,255,40); }"
-            " QPushButton:disabled { color: rgba(245,245,245,120); background-color: rgba(255,255,255,10); border-color: rgba(255,255,255,25); }"
-        )
+        # App-wide stylesheet is installed on QApplication; keep per-widget overrides minimal.
 
     def _wire(self) -> None:
-        self.btn_exit.clicked.connect(self.close)
-        self.btn_openai.clicked.connect(self._open_openai_dialog)
-        self.btn_settings.clicked.connect(self._open_settings_dialog)
-        self.btn_save.clicked.connect(self._save_defaults)
+        self.btn_exit.clicked.connect(lambda _=False: self.close())
+        self.btn_openai.clicked.connect(lambda _=False: self._open_openai_dialog())
+        self.btn_settings.clicked.connect(lambda _=False: self._open_settings_dialog())
+        self.btn_save.clicked.connect(lambda _=False: self._save_defaults())
 
         self.orb.orb_clicked.connect(self._on_orb_click)
+        self.orb.reset_clicked.connect(self._on_orb_reset)
         self.globe.ptt_pressed.connect(self._on_globe_press)
         self.globe.ptt_released.connect(self._on_globe_release)
 
         self.worker.state_changed.connect(self._on_state)
         self.worker.captions_updated.connect(self._on_captions)
         self.worker.error.connect(self._on_error)
+        self.worker.input_level.connect(self._on_input_level)
+        self.worker.output_level.connect(self._on_output_level)
 
     def _open_openai_dialog(self) -> None:
         d = OpenAIDialog(self.settings, self)
@@ -550,17 +706,28 @@ class MainWindow(QMainWindow):
             return []
         svc = OpenAIService(self.settings.openai_api_key)
         models = svc.list_models()
+        realtime = [m for m in models if "realtime" in m.lower()]
+        if realtime:
+            return sorted(set(realtime))
         return OpenAIService.filter_chat_models(models)
 
     def _open_settings_dialog(self) -> None:
-        d = SettingsDialog(
-            self.settings,
-            load_models_fn=self._load_models if self.settings.openai_api_key else None,
-            parent=self,
-        )
-        if d.exec():
-            d.apply()
-            self.settings.save()
+        try:
+            d = SettingsDialog(
+                self.settings,
+                load_models_fn=self._load_models if self.settings.openai_api_key else None,
+                parent=self,
+            )
+            if d.exec():
+                d.apply()
+                self.settings.save()
+        except Exception:
+            import logging, traceback
+            logging.getLogger("kajovochat").exception("settings_dialog_failed")
+            try:
+                QMessageBox.critical(self, "Nastavení", "Nepodařilo se otevřít nastavení. Podrobnosti jsou v logu.")
+            except Exception:
+                pass
 
     def _save_defaults(self) -> None:
         self.settings.save()
@@ -583,6 +750,26 @@ class MainWindow(QMainWindow):
         self.sig_start_handsfree.emit()
 
     @Slot()
+    def _on_orb_reset(self) -> None:
+        # Reset brings the app back to a clean idle state.
+        try:
+            self.sig_request_stop.emit()
+        except Exception:
+            pass
+        self._handsfree_running = False
+        self.globe.setEnabled(True)
+        self.orb.set_running(False)
+        self.orb.set_error_text("")
+
+    @Slot(float)
+    def _on_input_level(self, lvl: float) -> None:
+        self.orb.set_input_level(lvl)
+
+    @Slot(float)
+    def _on_output_level(self, lvl: float) -> None:
+        self.orb.set_output_level(lvl)
+
+    @Slot()
     def _on_globe_press(self) -> None:
         # In hands-free we ignore globe (disabled anyway).
         if self._handsfree_running:
@@ -602,6 +789,9 @@ class MainWindow(QMainWindow):
             self._handsfree_running = False
             self.globe.setEnabled(True)
             self.orb.set_running(False)
+        else:
+            # Clear stale error message.
+            self.orb.set_error_text("")
 
     @Slot(str)
     def _on_captions(self, text: str) -> None:
@@ -609,7 +799,8 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_error(self, msg: str) -> None:
-        QMessageBox.critical(self, "Chyba", msg)
+        # Show error in the orb (with Reset). Keep captions as-is.
+        self.orb.set_error_text(msg)
         self._handsfree_running = False
         self.globe.setEnabled(True)
         self.orb.set_running(False)
@@ -628,21 +819,16 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
+    settings = AppSettings.load()
+    session_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
+    try:
+        install_app_logging(log_dir=settings.ensure_log_dir(), session_tag=session_tag)
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
-    # Ensure buttons/inputs are readable on dark background across all dialogs.
-    app.setStyleSheet(
-        "QWidget { background-color: #0b0f18; color: #f2f2f2; }"
-        " QLabel { color: rgba(245,245,245,210); }"
-        " QGroupBox { border: 1px solid rgba(255,255,255,35); border-radius: 8px; margin-top: 10px; }"
-        " QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: rgba(245,245,245,220); }"
-        " QLineEdit, QComboBox { background-color: rgba(255,255,255,18); border: 1px solid rgba(255,255,255,55); border-radius: 6px; padding: 6px 8px; color: #f2f2f2; }"
-        " QComboBox::drop-down { border: none; }"
-        " QPushButton { padding: 8px 14px; color: #f2f2f2; background-color: rgba(255,255,255,22); border: 1px solid rgba(255,255,255,65); border-radius: 6px; }"
-        " QPushButton:hover { background-color: rgba(255,255,255,30); }"
-        " QPushButton:pressed { background-color: rgba(255,255,255,40); }"
-        " QPushButton:disabled { color: rgba(245,245,245,120); background-color: rgba(255,255,255,10); border-color: rgba(255,255,255,25); }"
-    )
-    w = MainWindow()
+    app.setStyleSheet(app_stylesheet())
+    w = MainWindow(settings)
     w.show()
     sys.exit(app.exec())
 

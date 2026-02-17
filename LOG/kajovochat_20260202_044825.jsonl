@@ -1,0 +1,6 @@
+{"seq":1,"session":"kajovochat_20260202_044825","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime","tts_voice":"alloy"},"ts_mono_ns":387494656000000,"ts_wall":1770004105.2699716,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260202_044825","text":"Ahoj, slyším tě dobře. Co pro tebe můžu udělat?","ts_mono_ns":387502390000000,"ts_wall":1770004112.9985461,"type":"assistant"}
+{"seq":3,"session":"kajovochat_20260202_044825","text":"Haló, haló.","ts_mono_ns":387502531000000,"ts_wall":1770004113.1476514,"type":"user"}
+{"seq":4,"session":"kajovochat_20260202_044825","text":"nemůžu se dostat do nastavení","ts_mono_ns":387509359000000,"ts_wall":1770004119.9660835,"type":"user"}
+{"seq":5,"session":"kajovochat_20260202_044825","text":"Jasně, s tím ti rád pomůžu. Řekni, co konkrétně chceš upravit – třeba zvuk, obraz, nebo něco jiného?","ts_mono_ns":387510625000000,"ts_wall":1770004121.230878,"type":"assistant"}
+{"seq":6,"session":"kajovochat_20260202_044825","ts_mono_ns":387520765000000,"ts_wall":1770004131.3747437,"type":"session_end"}

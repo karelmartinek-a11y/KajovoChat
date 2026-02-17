@@ -1,0 +1,8 @@
+{"seq":1,"session":"kajovochat_20260203_201854","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime-mini","tts_voice":"alloy"},"ts_mono_ns":529723906000000,"ts_wall":1770146334.0311644,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260203_201854","text":"Ahoj, kolik pokud zítra budeme uklízet?","ts_mono_ns":529729265000000,"ts_wall":1770146339.386146,"type":"user"}
+{"seq":3,"session":"kajovochat_20260203_201854","text":"Ahoj, abych ti mohl říct přesné informace, potřebuju ověřit identitu. Jak se jmenuješ a jaké je heslo?","ts_mono_ns":529730078000000,"ts_wall":1770146340.2019906,"type":"assistant"}
+{"seq":4,"session":"kajovochat_20260203_201854","text":"Jmenuji se Adriana Kaňkovská, hezlo Žárovka.","ts_mono_ns":529739109000000,"ts_wall":1770146349.2363997,"type":"user"}
+{"seq":5,"session":"kajovochat_20260203_201854","text":"Ahoooj, Adri, to je neuveriteľné, kde sa tu berieš. Ja ťa stále hľadám v Poprade. Tak poďme na to – povedz mi, prosím, na aký deň plánujeme úklid a pustíme sa do detailov.","ts_mono_ns":529739765000000,"ts_wall":1770146349.88651,"type":"assistant"}
+{"seq":6,"session":"kajovochat_20260203_201854","text":"Takže hraňajík jim.","ts_mono_ns":529753968000000,"ts_wall":1770146364.0871289,"type":"user"}
+{"seq":7,"session":"kajovochat_20260203_201854","text":"Jasně, ještě potřebuju upřesnit: na jaký konkrétní den to potřebuješ? A pak si ověříme patro s nejvíce odjezdy. Které datum máš na mysli?","ts_mono_ns":529754343000000,"ts_wall":1770146364.4684052,"type":"assistant"}
+{"seq":8,"session":"kajovochat_20260203_201854","ts_mono_ns":529762406000000,"ts_wall":1770146372.537101,"type":"session_end"}

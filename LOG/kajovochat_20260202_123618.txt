@@ -1,0 +1,2 @@
+2026-02-02 12:36:18 seq=1 SESSION_START
+2026-02-02 12:36:19 seq=2 ERROR Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.

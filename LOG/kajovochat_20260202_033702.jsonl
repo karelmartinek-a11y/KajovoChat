@@ -1,0 +1,8 @@
+{"seq":1,"session":"kajovochat_20260202_033702","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime","tts_voice":"alloy"},"ts_mono_ns":383212093000000,"ts_wall":1769999822.704609,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260202_033702","text":"Ahoj.","ts_mono_ns":383222109000000,"ts_wall":1769999832.725402,"type":"user"}
+{"seq":3,"session":"kajovochat_20260202_033702","text":"Čau, co potřebuješ?","ts_mono_ns":383222171000000,"ts_wall":1769999832.7807364,"type":"assistant"}
+{"seq":4,"session":"kajovochat_20260202_033702","text":"To jsem se zeptal, jak se ti daří.","ts_mono_ns":383226953000000,"ts_wall":1769999837.5658429,"type":"user"}
+{"seq":5,"session":"kajovochat_20260202_033702","text":"Díky za optání, mám se fajn. A co ty, jak jde život?","ts_mono_ns":383227921000000,"ts_wall":1769999838.532574,"type":"assistant"}
+{"seq":6,"session":"kajovochat_20260202_033702","text":"♪ O-o-o. ♪","ts_mono_ns":383233906000000,"ts_wall":1769999844.5222244,"type":"user"}
+{"seq":7,"session":"kajovochat_20260202_033702","text":"Tak to je paráda. Jestli máš něco na srdci, klidně se ptej.","ts_mono_ns":383234593000000,"ts_wall":1769999845.212473,"type":"assistant"}
+{"seq":8,"session":"kajovochat_20260202_033702","ts_mono_ns":383244890000000,"ts_wall":1769999855.5024474,"type":"session_end"}

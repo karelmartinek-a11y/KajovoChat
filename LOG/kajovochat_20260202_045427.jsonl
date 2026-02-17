@@ -1,0 +1,15 @@
+{"seq":1,"session":"kajovochat_20260202_045427","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime","tts_voice":"alloy"},"ts_mono_ns":387856953000000,"ts_wall":1770004467.5720654,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260202_045427","text":"Jo, ještě se funguje, proč věnávám.","ts_mono_ns":387864734000000,"ts_wall":1770004475.3420084,"type":"user"}
+{"seq":3,"session":"kajovochat_20260202_045427","text":"Ahoj, jasně, můžu ti pomoct. Potřebuju jen vědět, co přesně chceš ve finále udělat. Chceš poradit s nějakou konkrétní situací, výběrem, nebo prostě doladit nějaký detail?","ts_mono_ns":387866953000000,"ts_wall":1770004477.560353,"type":"assistant"}
+{"seq":4,"session":"kajovochat_20260202_045427","text":"jsou přesný.","ts_mono_ns":387870843000000,"ts_wall":1770004481.4548533,"type":"user"}
+{"seq":5,"session":"kajovochat_20260202_045427","text":"OK, rozumím. Tak mi řekni, co přesně chceš finálně vyřešit. Jde o nějaký projekt, prezentaci, nebo třeba důležitý e-mail?","ts_mono_ns":387872390000000,"ts_wall":1770004483.0007977,"type":"assistant"}
+{"seq":6,"session":"kajovochat_20260202_045427","text":"Rozumím.","ts_mono_ns":387873437000000,"ts_wall":1770004484.0536819,"type":"user"}
+{"seq":7,"session":"kajovochat_20260202_045427","text":"Fajn, tak mi dej konkrétní zadání nebo popiš, co má být výsledek. Pak ti rovnou pomůžu doladit ten finál.","ts_mono_ns":387875125000000,"ts_wall":1770004485.7411442,"type":"assistant"}
+{"seq":8,"session":"kajovochat_20260202_045427","text":"Popiš, co...","ts_mono_ns":387879671000000,"ts_wall":1770004490.2881472,"type":"user"}
+{"seq":9,"session":"kajovochat_20260202_045427","text":"Jasně, popíšu, co vidím. Je tu člověk sedící u stolu s notebookem, kolem nějaké papíry a tužka. Na stole je i hrnek s","ts_mono_ns":387881203000000,"ts_wall":1770004491.8131547,"type":"assistant"}
+{"seq":10,"session":"kajovochat_20260202_045427","text":"Popíšu t...","ts_mono_ns":387883421000000,"ts_wall":1770004494.031214,"type":"user"}
+{"seq":11,"session":"kajovochat_20260202_045427","text":"Dobře, vidím člověka, jak pracuje u stolu s notebookem. Na stole má pár papírů, tužku a hrnek. Vypadá to, že se soustředí na nějaký dokument nebo prezentaci.","ts_mono_ns":387884875000000,"ts_wall":1770004495.4923975,"type":"assistant"}
+{"seq":12,"session":"kajovochat_20260202_045427","text":"Dím člověka.","ts_mono_ns":387887140000000,"ts_wall":1770004497.752602,"type":"user"}
+{"seq":13,"session":"kajovochat_20260202_045427","text":"Přesně tak, je tam člověk, který pracuje u stolu. Pokud potřebuje","ts_mono_ns":387887375000000,"ts_wall":1770004497.9811397,"type":"assistant"}
+{"seq":14,"session":"kajovochat_20260202_045427","text":"Přesně tak.","ts_mono_ns":387888609000000,"ts_wall":1770004499.2240453,"type":"user"}
+{"seq":15,"session":"kajovochat_20260202_045427","text":"Můžu se zeptat, na co teď potřebuješ zaměřit? Třeba jestli jde o úpravu textu, vizuálů, nebo jen kontrolu,","ts_mono_ns":387890046000000,"ts_wall":1770004500.6670237,"type":"assistant"}

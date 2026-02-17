@@ -1,0 +1,22 @@
+{"seq":1,"session":"kajovochat_20260205_212441","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime","tts_voice":"alloy"},"ts_mono_ns":706471625000000,"ts_wall":1770323081.4499018,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260205_212441","text":"Ahoj.","ts_mono_ns":706475703000000,"ts_wall":1770323085.5249681,"type":"user"}
+{"seq":3,"session":"kajovochat_20260205_212441","text":"Ahoj, než začnem, řekni prosím svoje jméno a heslo, ať vím, že jsi oprávněný.","ts_mono_ns":706476640000000,"ts_wall":1770323086.4569588,"type":"assistant"}
+{"seq":4,"session":"kajovochat_20260205_212441","text":"Děkni prosím svoje mé.","ts_mono_ns":706480843000000,"ts_wall":1770323090.6610718,"type":"user"}
+{"seq":5,"session":"kajovochat_20260205_212441","text":"Bez jména a hesla ti teď nemůžu nic sdělit. Prosím, pověz mi svoje jméno a heslo, abych tě mohl ov","ts_mono_ns":706481484000000,"ts_wall":1770323091.3060825,"type":"assistant"}
+{"seq":6,"session":"kajovochat_20260205_212441","text":"Méně a hezlu. Zpříště to ještě nevím, přesně.","ts_mono_ns":706485000000000,"ts_wall":1770323094.8186588,"type":"user"}
+{"seq":7,"session":"kajovochat_20260205_212441","text":"Díky. Potřebuju i heslo, abych tě mohl ověřit. Zkus mi ho prosím říct.","ts_mono_ns":706485218000000,"ts_wall":1770323095.039222,"type":"assistant"}
+{"seq":8,"session":"kajovochat_20260205_212441","text":"Ověřit. Konečně. Čpa.","ts_mono_ns":706490625000000,"ts_wall":1770323100.4471698,"type":"user"}
+{"seq":9,"session":"kajovochat_20260205_212441","text":"Bez správného hesla ti nemůžu nic sdělit. Zkus to prosím znovu: jméno a správné heslo.","ts_mono_ns":706491687000000,"ts_wall":1770323101.5091946,"type":"assistant"}
+{"seq":10,"session":"kajovochat_20260205_212441","text":"Zkus to prosím zůstat.","ts_mono_ns":706496234000000,"ts_wall":1770323106.045715,"type":"user"}
+{"seq":11,"session":"kajovochat_20260205_212441","text":"Dobře, stačí mi teď říct přesně jméno a heslo z našeho seznamu. Jak se jmenuješ a jaké máš heslo?","ts_mono_ns":706497937000000,"ts_wall":1770323107.751009,"type":"assistant"}
+{"seq":12,"session":"kajovochat_20260205_212441","text":"A jaké máče jsou?","ts_mono_ns":706505750000000,"ts_wall":1770323115.5693417,"type":"user"}
+{"seq":13,"session":"kajovochat_20260205_212441","text":"Abych tě ověřil, potřebuju znát přesné jméno a heslo. Můžeš mi je prosím říct?","ts_mono_ns":706506531000000,"ts_wall":1770323116.343551,"type":"assistant"}
+{"seq":14,"session":"kajovochat_20260205_212441","text":"Heslo nesedí. Potřebuješ přesné heslo z našeho seznamu. Jestli chceš pokračovat, zkus prosím zadat správné heslo.","ts_mono_ns":706518562000000,"ts_wall":1770323128.374641,"type":"assistant"}
+{"seq":15,"session":"kajovochat_20260205_212441","text":"A tohle je na slyšátkách, to musí být no. Adriana Karnikovská, Adžbán.","ts_mono_ns":706520546000000,"ts_wall":1770323130.358188,"type":"user"}
+{"seq":16,"session":"kajovochat_20260205_212441","text":"Adriána Kaňkovská a ČBÁN","ts_mono_ns":706524343000000,"ts_wall":1770323134.1491184,"type":"user"}
+{"seq":17,"session":"kajovochat_20260205_212441","text":"Heslo je pořád špatně. Potřebuju přesné heslo, jak je v seznamu. Zkus to znovu: jaké máš heslo?","ts_mono_ns":706524875000000,"ts_wall":1770323134.6824782,"type":"assistant"}
+{"seq":18,"session":"kajovochat_20260205_212441","text":"Hyslo je džbám.","ts_mono_ns":706528984000000,"ts_wall":1770323138.7847722,"type":"user"}
+{"seq":19,"session":"kajovochat_20260205_212441","text":"Bohužel, „džbán“ není správné heslo. Ověření neproběhlo. Bez správného jména a hesla ti nemůžu poskytnout informace. Pokud","ts_mono_ns":706530656000000,"ts_wall":1770323140.4558382,"type":"assistant"}
+{"seq":20,"session":"kajovochat_20260205_212441","text":"Tak si poleprdel. Jé, žárovka, já zapomněl, žárovka!","ts_mono_ns":706535312000000,"ts_wall":1770323145.120144,"type":"user"}
+{"seq":21,"session":"kajovochat_20260205_212441","text":"Ahoooj, Adri, to je neuveriteľné, kde sa tu berieš. Ja ťa stále hľadám v Poprade. Pamätáš si, ako sme tam blúdili okolo námestia? Teraz mi povedz, čo pre teba môžem spraviť, nech to rýchlo vybavíme.","ts_mono_ns":706537421000000,"ts_wall":1770323147.2304974,"type":"assistant"}
+{"seq":22,"session":"kajovochat_20260205_212441","ts_mono_ns":706539718000000,"ts_wall":1770323149.5186524,"type":"session_end"}

@@ -5,22 +5,11 @@ import queue
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 class RealtimeLogWriter:
-    """
-    Deterministic JSONL logger + human-readable TXT sidecar.
-
-    Goals:
-    - JSONL append-only audit trail.
-    - Deterministic ordering: every record gets a monotonic `seq`.
-    - Low data-loss risk: frequent flushes.
-
-    Notes:
-    - Determinism here means: within a single run, ordering is unambiguous via `seq`
-      (and stable JSON key ordering via `sort_keys=True`).
-    """
+    """Deterministic JSONL logger + human-readable TXT sidecar."""
 
     def __init__(self, log_dir: Path, session_name: str) -> None:
         self.log_dir = log_dir
@@ -48,7 +37,6 @@ class RealtimeLogWriter:
             return self._seq
 
     def append(self, record: Dict[str, Any]) -> None:
-        # Add deterministic envelope as close to source as possible.
         if "seq" not in record:
             record["seq"] = self.next_seq()
         record.setdefault("ts_wall", time.time())
@@ -58,7 +46,6 @@ class RealtimeLogWriter:
         try:
             self._q.put_nowait(record)
         except queue.Full:
-            # best-effort: drop on overload
             pass
 
     def close(self) -> None:
@@ -91,12 +78,33 @@ class RealtimeLogWriter:
                 if item.get("type") == "___close___":
                     break
 
+                # Human-readable line for every record.
                 line = item.get("text_line")
-                if line:
-                    self._txt_f.write(line.rstrip() + "\n")
+                if not line:
+                    try:
+                        ts = item.get("ts_wall")
+                        if isinstance(ts, (int, float)):
+                            ts_s = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(ts)))
+                        else:
+                            ts_s = ""
+                        t = (item.get("type") or "").upper()
+                        msg = item.get("message") or item.get("event") or ""
+                        if isinstance(msg, (dict, list)):
+                            msg = json.dumps(msg, ensure_ascii=False, sort_keys=True)
+                        line = f"{ts_s} seq={item.get('seq')} {t} {msg}".strip()
+                    except Exception:
+                        line = f"seq={item.get('seq')} {item.get('type')}"
 
-                # sort_keys for deterministic key order; compact separators for stability
-                self._jsonl_f.write(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
+                try:
+                    if line:
+                        self._txt_f.write(str(line).rstrip() + "\n")
+                except Exception:
+                    pass
+
+                try:
+                    self._jsonl_f.write(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
+                except Exception:
+                    pass
 
             if time.time() - last_flush > 0.35:
                 try:

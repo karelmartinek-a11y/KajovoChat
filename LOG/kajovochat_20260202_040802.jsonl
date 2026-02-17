@@ -1,0 +1,2 @@
+{"seq":1,"session":"kajovochat_20260202_040802","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime","tts_voice":"alloy"},"ts_mono_ns":385071421000000,"ts_wall":1770001682.0400343,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260202_040802","ts_mono_ns":385073468000000,"ts_wall":1770001684.084334,"type":"session_end"}

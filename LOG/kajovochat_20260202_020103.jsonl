@@ -1,0 +1,2 @@
+{"seq":1,"session":"kajovochat_20260202_020103","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime","tts_voice":"fable"},"ts_mono_ns":377453218000000,"ts_wall":1769994063.839007,"type":"session_start"}
+{"message":"Unknown parameter: 'session.turn_detection'.","seq":2,"session":"kajovochat_20260202_020103","ts_mono_ns":377454109000000,"ts_wall":1769994064.730517,"type":"error"}

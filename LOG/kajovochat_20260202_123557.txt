@@ -1,0 +1,11 @@
+2026-02-02 12:35:57 seq=1 SESSION_START
+2026-02-02 12:35:58 seq=2 ERROR Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.
+2026-02-02 12:35:58 seq=3 ERROR Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.
+2026-02-02 12:35:58 seq=4 ERROR Conversation already has an active response in progress: resp_D4mViTf1fSj7CjcQHeMo0. Wait until the response is finished before creating a new one.
+2026-02-02 12:35:59 seq=5 ERROR Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.
+2026-02-02 12:35:59 seq=6 ERROR Conversation already has an active response in progress: resp_D4mViTf1fSj7CjcQHeMo0. Wait until the response is finished before creating a new one.
+2026-02-02 12:36:01 seq=7 ERROR Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.
+2026-02-02 12:36:01 seq=8 ERROR Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.
+2026-02-02 12:36:02 seq=9 ERROR Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 80.00ms of audio.
+2026-02-02 12:36:04 seq=10 ERROR Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 80.00ms of audio.
+2026-02-02 12:36:16 seq=11 SESSION_END

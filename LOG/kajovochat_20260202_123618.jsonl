@@ -1,0 +1,2 @@
+{"seq":1,"session":"kajovochat_20260202_123618","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime","tts_voice":"ballad"},"ts_mono_ns":415567921000000,"ts_wall":1770032178.6480439,"type":"session_start"}
+{"message":"Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.","seq":2,"session":"kajovochat_20260202_123618","ts_mono_ns":415568828000000,"ts_wall":1770032179.561939,"type":"error"}

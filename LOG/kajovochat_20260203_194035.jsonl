@@ -1,0 +1,4 @@
+{"seq":1,"session":"kajovochat_20260203_194035","settings":{"audio":{"input_device":null,"output_device":null},"language":"cs","openai_base_url":"wss://api.openai.com/v1/realtime","realtime_model":"gpt-realtime-mini","tts_voice":"alloy"},"ts_mono_ns":527425078000000,"ts_wall":1770144035.1247838,"type":"session_start"}
+{"seq":2,"session":"kajovochat_20260203_194035","text":"Jasně, rád ti pomůžu. Co přesně bys chtěl spočítat? Můžeš mi dát nějaká čísla nebo příklad?","ts_mono_ns":527429218000000,"ts_wall":1770144039.2622757,"type":"assistant"}
+{"seq":3,"session":"kajovochat_20260203_194035","text":"Slište to.","ts_mono_ns":527429281000000,"ts_wall":1770144039.3235364,"type":"user"}
+{"seq":4,"session":"kajovochat_20260203_194035","ts_mono_ns":527435187000000,"ts_wall":1770144045.2271783,"type":"session_end"}
