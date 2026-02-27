@@ -5,7 +5,7 @@
 - Remote URL: https://github.com/karelmartinek-a11y/KajovoChat.git
 - Cílová větev: main
 - Výchozí větev z origin/HEAD (před úpravou): master; nyní přesměrováno na main
-- Vytvořené tagy: pre-reborne-20260227, baseline-20260227 (bude vytvořen na finálním HEAD)
+- Vytvořené tagy: pre-reborne-20260227, baseline-20260227
 
 ## Merge konsolidace
 - Zpracováno remote branchí celkem: 1
@@ -28,6 +28,6 @@
 - Log: audit_06_deleted_remote_branches.txt
 
 ## Finální stav
-- Aktuální HEAD hash: bude toto vydání (viz audit_07_status_post.txt po vytvoření)
+- Aktuální HEAD hash: e614fad
 - Poslední commity (oneline): viz audit_07_status_post.txt
 - Potvrzení: na originu zůstává pouze origin/main (+ origin/HEAD -> main)
