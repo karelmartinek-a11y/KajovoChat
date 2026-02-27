@@ -1,0 +1,32 @@
+﻿git status -sb
+## main...origin/main
+?? audit_00_env.txt
+?? audit_01_status_pre.txt
+?? audit_02_branches_remote_sorted.txt
+?? audit_03_merge_log.txt
+?? audit_04_tests_log.txt
+?? audit_05_cleanup_log.txt
+?? audit_06_deleted_remote_branches.txt
+?? audit_07_status_post.txt
+?? docs/
+
+git branch -r
+  origin/main
+
+git log --oneline --decorate -n 50
+d0e68d6 (HEAD -> main, origin/main) docs: note forensic reborne baseline
+bc75cda fix: keep tests green without kajovospend deps
+7c0c27b chore: reborne audit cleanup (gitignore + untrack generated artifacts)
+1eaac25 (tag: pre-reborne-20260227, master) Aktualizace KajovoChat
+0ea9e4d (tag: milestone-bughunt-pre-20260202-0446, tag: milestone-bughunt-post-20260202-0452, tag: milestone-bughunt-post-20260202-0447) Update TTS voice list and normalize settings
+2dd2ba6 (tag: milestone-post-bughunt-20260202025722) Fix PySide6 qimage buffer conversion
+b738518 Integrate voice pipeline updates
+6707fb9 Add START.BAT
+1930c89 Initial commit
+
+git tag --list (last 50)
+milestone-bughunt-post-20260202-0447
+milestone-bughunt-post-20260202-0452
+milestone-bughunt-pre-20260202-0446
+milestone-post-bughunt-20260202025722
+pre-reborne-20260227

@@ -1,0 +1,26 @@
+﻿git stash list
+stash@{0}: On master: pre-reborne-audit 20260227-220404
+stash@{1}: On master: pre-reborne-audit 20260227-220349
+git fetch --all --prune --tags
+git : git@github.com: Permission denied (publickey).
+At line:2 char:118
++ ... t -Append -Encoding utf8; git fetch --all --prune --tags 2>&1 | Out-F ...
++                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (git@github.com:...ed (publickey).:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+git fetch --all --prune --tags
+git push origin pre-reborne-20260227
+git : To https://github.com/karelmartinek-a11y/KajovoChat.git
+At line:2 char:124
++ ... end -Encoding utf8; git push origin pre-reborne-20260227 2>&1 | Out-F ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (To https://gith.../KajovoChat.git:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ * [new tag]         pre-reborne-20260227 -> pre-reborne-20260227
+git fetch --all --prune --tags

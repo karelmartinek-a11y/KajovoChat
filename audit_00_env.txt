@@ -1,0 +1,16 @@
+﻿pwd
+
+Path                
+----                
+C:\github\kajovochat
+
+
+git --version
+git version 2.52.0.windows.1
+git remote -v
+origin	https://github.com/karelmartinek-a11y/KajovoChat.git (fetch)
+origin	https://github.com/karelmartinek-a11y/KajovoChat.git (push)
+git config --get user.name
+Karel Martínek
+git config --get user.email
+karel.martinek@post.cz
