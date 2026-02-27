@@ -1,23 +1,27 @@
-# Chatbot Kája
+﻿# Chatbot Kája
 
-Desktop aplikace (PySide6) pro hlasovou konverzaci s OpenAI Realtime (hands‑free i push‑to‑talk).
+Desktop aplikace (PySide6) pro hlasovou konverzaci s OpenAI Realtime (hands-free i push-to-talk).
 
 ## Spuštění
 
 1. Nainstalujte závislosti:
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+pip install -r requirements.txt
+```
 
 2. Spusťte aplikaci:
 
-   ```bash
-   python -m kajovochat
-   ```
+```bash
+python -m kajovochat
+```
 
 Alternativně lze použít i `python app_gui.py`.
 
 ## Nastavení
 
 API klíč a ostatní parametry se nastavují přímo v aplikaci přes dialog „Nastavení“.
+
+## Forensic Reborne Audit
+
+2026-02-27: Proběhla konsolidace větví do `main`, která slouží jako nová baseline (Forensic Reborne Audit).
