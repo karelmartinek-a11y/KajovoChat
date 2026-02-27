@@ -1,13 +1,14 @@
 ﻿git status -sb
-## main...origin/main [ahead 2]
+## main...origin/main
 
 git branch -r
   origin/main
 
 git log --oneline --decorate -n 50
-14db9ba (HEAD -> main, tag: baseline-20260227) chore: refresh post-audit status log
+8b1758a (HEAD -> main, tag: baseline-20260227, origin/main) chore: finalize audit status snapshot
+14db9ba chore: refresh post-audit status log
 e86a32c docs: add kajovoFRA forensic audit report
-d0e68d6 (origin/main) docs: note forensic reborne baseline
+d0e68d6 docs: note forensic reborne baseline
 bc75cda fix: keep tests green without kajovospend deps
 7c0c27b chore: reborne audit cleanup (gitignore + untrack generated artifacts)
 1eaac25 (tag: pre-reborne-20260227, master) Aktualizace KajovoChat
