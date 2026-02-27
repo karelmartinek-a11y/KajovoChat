@@ -6,8 +6,12 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, List
 
+import pytest
+
+sqlalchemy = pytest.importorskip("sqlalchemy")
 from sqlalchemy import select
 
+kajovospend = pytest.importorskip("kajovospend")
 from kajovospend.db.migrate import init_db
 from kajovospend.db.models import Document, LineItem
 from kajovospend.db.session import make_engine, make_session_factory

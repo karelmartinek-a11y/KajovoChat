@@ -4,6 +4,9 @@ import logging
 import unittest
 from unittest.mock import patch
 
+import pytest
+
+kajovospend = pytest.importorskip("kajovospend")
 from kajovospend.integrations.ares import AresError, AresRecord
 from kajovospend.service.processor import Processor
 
