@@ -1,12 +1,12 @@
 ﻿git status -sb
-## main...origin/main [ahead 1]
- M audit_07_status_post.txt
+## main...origin/main [ahead 2]
 
 git branch -r
   origin/main
 
 git log --oneline --decorate -n 50
-e86a32c (HEAD -> main, tag: baseline-20260227) docs: add kajovoFRA forensic audit report
+14db9ba (HEAD -> main, tag: baseline-20260227) chore: refresh post-audit status log
+e86a32c docs: add kajovoFRA forensic audit report
 d0e68d6 (origin/main) docs: note forensic reborne baseline
 bc75cda fix: keep tests green without kajovospend deps
 7c0c27b chore: reborne audit cleanup (gitignore + untrack generated artifacts)
