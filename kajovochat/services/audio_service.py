@@ -452,6 +452,14 @@ class AudioPlayer:
         except Exception:
             return 0.0
 
+    @property
+    def buffered_bytes(self) -> int:
+        try:
+            with self._lock:
+                return int(len(self._buffer))
+        except Exception:
+            return 0
+
     def enqueue_pcm16(self, pcm_bytes: bytes) -> None:
         if not pcm_bytes:
             return
@@ -528,6 +536,13 @@ class RealtimeMicStream:
     @property
     def queue(self) -> "queue.Queue[bytes]":
         return self._queue
+
+    @property
+    def pending_chunk_count(self) -> int:
+        try:
+            return int(self._queue.qsize())
+        except Exception:
+            return 0
 
     def start(self) -> None:
         if self._running:

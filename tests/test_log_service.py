@@ -20,3 +20,13 @@ def test_log_writer_writes_files() -> None:
         assert "USER" in txt
         assert '"type":"assistant"' in jsonl
         assert writer.last_error == ""
+
+
+def test_log_writer_records_write_error() -> None:
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+        writer = RealtimeLogWriter(Path(temp_dir), "session_test_error", queue_size=8)
+        writer._txt_f.close()
+        writer.append({"type": "user", "text": "ahoj"})
+        writer.close()
+
+        assert writer.last_error

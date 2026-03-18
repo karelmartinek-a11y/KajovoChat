@@ -73,6 +73,7 @@ class RealtimeService:
         self.on_response_done: Optional[Callable[[], None]] = None
 
         self._assistant_text_buf = ""
+        self.last_event_ts = time.monotonic()
 
     @property
     def is_connected(self) -> bool:
@@ -99,6 +100,7 @@ class RealtimeService:
                 evt = json.loads(message)
             except Exception:
                 return
+            self.last_event_ts = time.monotonic()
             self._events.put(evt)
 
         def _on_error(ws, error):
@@ -247,6 +249,13 @@ class RealtimeService:
             self.cfg.turn_mode = turn_mode
         self._send_session_update()
 
+    @property
+    def pending_event_count(self) -> int:
+        try:
+            return int(self._events.qsize())
+        except Exception:
+            return 0
+
     # ---- Audio input ----
 
     def append_audio_pcm16(self, pcm16_bytes: bytes) -> None:
@@ -284,6 +293,7 @@ class RealtimeService:
         etype = evt.get("type")
         if not etype:
             return
+        self.last_event_ts = time.monotonic()
 
         if etype == "error":
             msg = evt.get("error", {}).get("message") or json.dumps(evt, ensure_ascii=False)

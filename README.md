@@ -7,7 +7,8 @@ Desktop aplikace v `PySide6` pro hlasovou konverzaci přes OpenAI Realtime API.
 - hlasový režim `hands-free` přes klik na měsíc
 - režim `push-to-talk` podržením zeměkoule
 - výběr modelu, hlasu, jazyka a audio zařízení v GUI
-- lokální logování průběhu relace do uživatelského adresáře
+- volitelné technické logování průběhu relace do uživatelského adresáře
+- kontrolu integrity binárních assetů při startu
 
 ## Požadavky
 
@@ -55,7 +56,7 @@ Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. Ve
 C:\Users\<uživatel>\AppData\Local\Kajovo\ChatbotKaja\settings.json
 ```
 
-OpenAI API klíč je ve Windows uložen přes DPAPI. Obsah konverzací se do logů zapisuje jen pokud to výslovně povolíte v `Nastavení`.
+OpenAI API klíč je ve Windows uložen přes DPAPI. Na ostatních platformách aplikace používá systémový keyring, pokud je dostupný. Obsah konverzací se do logů zapisuje jen pokud to výslovně povolíte v `Nastavení`.
 
 ## Struktura projektu
 

@@ -3,15 +3,23 @@ from __future__ import annotations
 import json
 import base64
 import ctypes
+import tempfile
+from datetime import datetime
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
 from appdirs import user_config_dir
 
+try:
+    import keyring
+except Exception:
+    keyring = None
+
 
 APP_NAME = "ChatbotKaja"
 ORG_NAME = "Kajovo"
+KEYRING_SERVICE = "KajovoChat/OpenAI"
 
 
 def _config_dir() -> Path:
@@ -102,6 +110,13 @@ def _encode_api_key(key: str) -> str:
             return _dpapi_encrypt(key)
         except Exception:
             pass
+    if keyring is not None:
+        try:
+            key_id = str(_config_path().resolve())
+            keyring.set_password(KEYRING_SERVICE, key_id, key)
+            return "keyring:" + key_id
+        except Exception:
+            pass
     return "legacy:" + _mask_key(key)
 
 
@@ -115,7 +130,23 @@ def _decode_api_key(stored: str) -> str:
             return ""
     if stored.startswith("legacy:"):
         return _unmask_key(stored.split(":", 1)[1])
+    if stored.startswith("keyring:") and keyring is not None:
+        try:
+            key_id = stored.split(":", 1)[1]
+            return keyring.get_password(KEYRING_SERVICE, key_id) or ""
+        except Exception:
+            return ""
     return _unmask_key(stored)
+
+
+def _delete_stored_api_key(stored: str) -> None:
+    if not stored or not stored.startswith("keyring:") or keyring is None:
+        return
+    try:
+        key_id = stored.split(":", 1)[1]
+        keyring.delete_password(KEYRING_SERVICE, key_id)
+    except Exception:
+        pass
 
 
 LANGUAGE_CHOICES = [
@@ -214,12 +245,12 @@ class AppSettings:
 
     # OpenAI.
     openai_api_key_masked: str = ""
-    chat_model: str = "gpt-4o-mini"
     realtime_model: str = "gpt-realtime"
     stt_model: str = "whisper-1"
     tts_model: str = "gpt-4o-mini-tts"
     tts_voice: str = "alloy"
     tts_speed: float = 1.0
+    write_logs: bool = True
     log_conversations: bool = False
 
     # Parametry modelu.
@@ -245,11 +276,24 @@ class AppSettings:
 
     @openai_api_key.setter
     def openai_api_key(self, key: str) -> None:
+        _delete_stored_api_key(self.openai_api_key_masked)
         self.openai_api_key_masked = _encode_api_key(key)
 
     def ensure_log_dir(self) -> Path:
         path = Path(self.log_dir).expanduser().resolve()
         path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def validate_log_dir(self) -> Path:
+        path = self.ensure_log_dir()
+        probe = None
+        try:
+            with tempfile.NamedTemporaryFile(prefix="kajovochat_", suffix=".tmp", dir=path, delete=False) as handle:
+                handle.write(b"ok")
+                probe = Path(handle.name)
+        finally:
+            if probe and probe.exists():
+                probe.unlink()
         return path
 
     def save(self) -> None:
@@ -265,7 +309,18 @@ class AppSettings:
             settings.save()
             return settings
 
-        data = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            broken_name = path.with_suffix(path.suffix + f".broken-{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            try:
+                path.replace(broken_name)
+            except Exception:
+                pass
+            settings = cls()
+            settings.ensure_log_dir()
+            settings.save()
+            return settings
 
         if "voice_language" in data and "language" not in data:
             data["language"] = normalize_language_code(data.get("voice_language", "auto"))
@@ -273,6 +328,8 @@ class AppSettings:
             data["formality"] = "vykání"
         if "tts_voice_female" in data and "tts_voice" not in data:
             data["tts_voice"] = data.get("tts_voice_female") or "nova"
+        if "write_logs" not in data:
+            data["write_logs"] = True
         if "log_conversations" not in data:
             data["log_conversations"] = False
 

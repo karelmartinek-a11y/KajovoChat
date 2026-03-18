@@ -114,8 +114,12 @@ class OrbWidget(QWidget):
         base_rot = 0.10 if self._running else 0.0
         if self._state == "idle":
             base_rot += 0.04
+        elif self._state == "connecting":
+            base_rot += 0.14
         elif self._state == "listening":
             base_rot += 0.28
+        elif self._state == "reconnecting":
+            base_rot += 0.20
         elif self._state == "transcribing":
             base_rot += 0.18
         elif self._state == "thinking":
@@ -169,10 +173,17 @@ class OrbWidget(QWidget):
         if self._state == "idle":
             breathe_amp = 0.022
             breathe_freq = 0.70
+        elif self._state == "connecting":
+            breathe_amp = 0.026
+            breathe_freq = 1.20
         elif self._state == "listening":
             breathe_amp = 0.018
             breathe_freq = 1.70
             extra += 0.36 * self._in_level
+        elif self._state == "reconnecting":
+            breathe_amp = 0.030
+            breathe_freq = 1.35
+            extra += 0.10 * math.sin(t * 3.0)
         elif self._state == "transcribing":
             breathe_amp = 0.032
             breathe_freq = 0.92

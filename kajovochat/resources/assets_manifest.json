@@ -1,0 +1,18 @@
+{
+  "earth_clouds_hd.png": {
+    "sha256": "bf513df32c823ee82d653da5bf87fbfcdc49eed2d15fd1566b8757f460912ffb",
+    "bytes": 2900309
+  },
+  "earth_hd.png": {
+    "sha256": "3f352644d9d335e16a885a8ae5eff01af6888484c5ab5462302ffe5714d54e01",
+    "bytes": 1554286
+  },
+  "logo_chatbot_kaja.png": {
+    "sha256": "c44975a7909e31abdbd0ad1d8969faec01434db44097e73728e855535079de33",
+    "bytes": 227832
+  },
+  "moon_hd.png": {
+    "sha256": "372700bbf7757f910bb8f986db328af4f11dd8b260abd50fa75a21b760b8d900",
+    "bytes": 4256998
+  }
+}

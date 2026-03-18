@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import queue
+import re
 import threading
 import time
 from datetime import datetime
@@ -10,7 +11,7 @@ from typing import List, Optional, Tuple
 
 import sounddevice as sd
 
-from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot
+from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QTimer
 from PySide6.QtGui import QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -42,12 +43,31 @@ from .services.audio_service import (
 from .services.realtime_service import RealtimeConfig, RealtimeService
 from .services.log_service import RealtimeLogWriter
 from .services.app_logging import install_app_logging
+from .resources.assets import verify_asset_manifest
 from .widgets.orb_widget import OrbWidget
 from .widgets.globe_button import GlobeButton
 from .theme import Theme, app_stylesheet
 
 
 _ALLOWED_LANGS = {"cs", "en", "de", "sk", "fr"}
+_STATE_IDLE = "idle"
+_STATE_CONNECTING = "connecting"
+_STATE_LISTENING = "listening"
+_STATE_TRANSCRIBING = "transcribing"
+_STATE_THINKING = "thinking"
+_STATE_SPEAKING = "speaking"
+_STATE_RECONNECTING = "reconnecting"
+_STATE_ERROR = "error"
+_VALID_STATES = {
+    _STATE_IDLE,
+    _STATE_CONNECTING,
+    _STATE_LISTENING,
+    _STATE_TRANSCRIBING,
+    _STATE_THINKING,
+    _STATE_SPEAKING,
+    _STATE_RECONNECTING,
+    _STATE_ERROR,
+}
 
 
 def _resolve_tts_voice(lang: str, preferred: str) -> Tuple[str, Optional[str]]:
@@ -63,6 +83,14 @@ def _resolve_tts_voice(lang: str, preferred: str) -> Tuple[str, Optional[str]]:
     allowed = LANG_TO_PREFERRED_VOICES.get(lang, [])
     fallback = allowed[0] if allowed else (TTS_VOICES[0] if TTS_VOICES else "alloy")
     return fallback, f"fallback_voice:{preferred}->{fallback}"
+
+
+def _sanitize_text(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"sk-[A-Za-z0-9_-]{8,}", "[REDACTED_OPENAI_KEY]", text)
+    return text
 
 
 class ConversationWorker(QObject):
@@ -108,6 +136,10 @@ class ConversationWorker(QObject):
         self._response_started_at: Optional[float] = None
         self._response_first_audio_at: Optional[float] = None
         self._speech_stopped_at: Optional[float] = None
+        self._last_server_activity_at = time.monotonic()
+        self._last_backlog_log_at = 0.0
+        self._last_player_progress_at = time.monotonic()
+        self._last_player_buffer_bytes = 0
 
         # Level signals are throttled to avoid saturating the Qt event loop.
         self._last_in_level: float = 0.0
@@ -118,11 +150,14 @@ class ConversationWorker(QObject):
         self._awaiting_transcript = False
 
         # Best-effort current UI state.
-        self._ui_state = "idle"
+        self._ui_state = _STATE_IDLE
 
     def _set_state(self, s: str) -> None:
-        self._ui_state = s
-        self.state_changed.emit(s)
+        normalized = (s or _STATE_IDLE).strip().lower()
+        if normalized not in _VALID_STATES:
+            normalized = _STATE_IDLE
+        self._ui_state = normalized
+        self.state_changed.emit(normalized)
 
     @staticmethod
     def _pcm16_level(pcm: bytes) -> float:
@@ -211,9 +246,6 @@ class ConversationWorker(QObject):
     def _start_session_if_needed(self) -> None:
         if self._logger:
             return
-        log_dir = self.settings.ensure_log_dir()
-        session_name = datetime.now().strftime("kajovochat_%Y%m%d_%H%M%S")
-        self._logger = RealtimeLogWriter(log_dir=log_dir, session_name=session_name)
         self._captions = ""
         self.captions_updated.emit(self._captions)
         self._reconnect_attempts = 0
@@ -221,6 +253,18 @@ class ConversationWorker(QObject):
         self._response_started_at = None
         self._response_first_audio_at = None
         self._speech_stopped_at = None
+        self._last_server_activity_at = time.monotonic()
+        self._last_backlog_log_at = 0.0
+        self._last_player_progress_at = time.monotonic()
+        self._last_player_buffer_bytes = 0
+        if not self.settings.write_logs:
+            self._append_caption(
+                f"Relace: model={self.settings.realtime_model}, hlas={self.settings.tts_voice}, log obsahu=ne"
+            )
+            return
+        log_dir = self.settings.validate_log_dir()
+        session_name = datetime.now().strftime("kajovochat_%Y%m%d_%H%M%S")
+        self._logger = RealtimeLogWriter(log_dir=log_dir, session_name=session_name)
 
         self._log_event(
             "session_start",
@@ -230,6 +274,7 @@ class ConversationWorker(QObject):
                 "language": self.settings.language,
                 "tts_voice": self.settings.tts_voice,
                 "tts_speed": self.settings.tts_speed,
+                "write_logs": bool(self.settings.write_logs),
                 "log_conversations": bool(self.settings.log_conversations),
                 "audio": {
                     "input_device": self.settings.input_device,
@@ -292,9 +337,11 @@ class ConversationWorker(QObject):
             # Znovu vytvorit websocket po odpojeni.
             self._rt = RealtimeService(cfg)
             self._wire_realtime_callbacks(self._rt)
+            self._set_state(_STATE_CONNECTING if self._reconnect_attempts == 0 else _STATE_RECONNECTING)
             self._rt.connect()
             self._reconnect_attempts = 0
             self._next_reconnect_at = 0.0
+            self._last_server_activity_at = time.monotonic()
             return self._rt
 
         # Same websocket; update session settings.
@@ -313,7 +360,11 @@ class ConversationWorker(QObject):
         return self._rt
 
     def _wire_realtime_callbacks(self, rt: RealtimeService) -> None:
-        rt.on_status = lambda s: self._append_caption(s)
+        def _status(msg: str) -> None:
+            self._last_server_activity_at = time.monotonic()
+            self._append_caption(msg)
+
+        rt.on_status = _status
 
         def _is_recoverable_realtime_error(msg: str) -> bool:
             text = (msg or "").lower()
@@ -321,24 +372,26 @@ class ConversationWorker(QObject):
             return any(marker in text for marker in markers)
 
         def _err(msg: str) -> None:
-            self._log_event("error", message=msg)
+            safe_msg = _sanitize_text(msg)
+            self._log_event("error", message=safe_msg)
             if self._mode != "idle" and _is_recoverable_realtime_error(msg):
-                self._schedule_reconnect(msg)
+                self._schedule_reconnect(safe_msg)
                 return
             self._stop_realtime_session()
-            self._set_state("error")
-            self.error.emit(msg)
+            self._set_state(_STATE_ERROR)
+            self.error.emit(safe_msg)
 
         rt.on_error = _err
 
         def _user(t: str) -> None:
+            self._last_server_activity_at = time.monotonic()
             self._append_caption(f"Ty: {t}")
             self._log_conversation_text("user", t)
 
             # Transition from "transcribing" to "thinking" once we have a transcript.
             self._awaiting_transcript = False
-            if self._ui_state not in {"speaking", "error"}:
-                self._set_state("thinking")
+            if self._ui_state not in {_STATE_SPEAKING, _STATE_ERROR}:
+                self._set_state(_STATE_THINKING)
             self._response_started_at = time.monotonic()
 
         rt.on_user_transcript = _user
@@ -346,6 +399,7 @@ class ConversationWorker(QObject):
         rt.on_assistant_text_delta = lambda d: self._set_caption_preview("AI", d)
 
         def _ai_done(t: str) -> None:
+            self._last_server_activity_at = time.monotonic()
             self._append_caption(f"AI: {t}")
             self._log_conversation_text("assistant", t)
 
@@ -353,7 +407,8 @@ class ConversationWorker(QObject):
 
         def _audio(pcm: bytes) -> None:
             # Audio deltas arrive faster than realtime; enqueue and let the player drain.
-            self._set_state("speaking")
+            self._last_server_activity_at = time.monotonic()
+            self._set_state(_STATE_SPEAKING)
             if self._response_first_audio_at is None:
                 self._response_first_audio_at = time.monotonic()
                 latency_ms = None
@@ -368,8 +423,8 @@ class ConversationWorker(QObject):
                 # If playback fails (wrong output device), surface a helpful error.
                 self._log_event("error", message=str(e))
                 self._stop_realtime_session()
-                self._set_state("error")
-                self.error.emit(str(e) + "\n\n" + format_device_help())
+                self._set_state(_STATE_ERROR)
+                self.error.emit(_sanitize_text(str(e)) + "\n\n" + format_device_help())
 
         rt.on_assistant_audio_delta = _audio
 
@@ -381,10 +436,11 @@ class ConversationWorker(QObject):
             except Exception:
                 pass
             self._awaiting_transcript = False
-            self._set_state("listening")
+            self._set_state(_STATE_LISTENING)
             self._response_started_at = None
             self._response_first_audio_at = None
             self._speech_stopped_at = None
+            self._last_server_activity_at = time.monotonic()
             self._log_event("speech_started")
 
         rt.on_vad_speech_started = _speech_started
@@ -393,8 +449,9 @@ class ConversationWorker(QObject):
             # Server will emit input_audio_transcription.completed afterwards.
             self._awaiting_transcript = True
             # In handsfree, the server will auto-create the response (create_response=True).
-            self._set_state("transcribing")
+            self._set_state(_STATE_TRANSCRIBING)
             self._speech_stopped_at = time.monotonic()
+            self._last_server_activity_at = time.monotonic()
             self._log_event("speech_stopped")
 
         rt.on_vad_speech_stopped = _speech_stopped
@@ -406,13 +463,14 @@ class ConversationWorker(QObject):
                 total_latency_ms = int((time.monotonic() - self._speech_stopped_at) * 1000)
             self._log_event("response_done", total_latency_ms=total_latency_ms)
             if self._mode == "handsfree":
-                self._set_state("listening")
+                self._set_state(_STATE_LISTENING)
             else:
-                self._set_state("idle")
+                self._set_state(_STATE_IDLE)
             self._awaiting_transcript = False
             self._response_started_at = None
             self._response_first_audio_at = None
             self._speech_stopped_at = None
+            self._last_server_activity_at = time.monotonic()
 
         rt.on_response_done = _resp_done
 
@@ -428,7 +486,7 @@ class ConversationWorker(QObject):
         except Exception:
             pass
         self._rt = None
-        self._set_state("transcribing" if self._awaiting_transcript else "thinking")
+        self._set_state(_STATE_RECONNECTING)
 
     def _attempt_reconnect_if_needed(self) -> None:
         if self._mode == "idle":
@@ -444,15 +502,57 @@ class ConversationWorker(QObject):
             if self._mode == "handsfree" and self._mic and not self._mic_enabled.is_set():
                 self._mic_enabled.set()
             if self._mode == "handsfree":
-                self._set_state("listening")
+                self._set_state(_STATE_LISTENING)
         except Exception as exc:
-            self._log_event("reconnect_failed", message=str(exc), attempt=self._reconnect_attempts)
+            safe_exc = _sanitize_text(str(exc))
+            self._log_event("reconnect_failed", message=safe_exc, attempt=self._reconnect_attempts)
             if self._reconnect_attempts >= 5:
                 self._stop_realtime_session()
-                self._set_state("error")
-                self.error.emit(f"Realtime se nepodařilo obnovit: {exc}")
+                self._set_state(_STATE_ERROR)
+                self.error.emit(f"Realtime se nepodařilo obnovit: {safe_exc}")
                 return
-            self._schedule_reconnect(str(exc))
+            self._schedule_reconnect(safe_exc)
+
+    def _check_runtime_health(self) -> None:
+        now = time.monotonic()
+        pending_events = self._rt.pending_event_count if self._rt else 0
+        pending_mic = self._mic.pending_chunk_count if self._mic else 0
+        pending_player_bytes = self._player.buffered_bytes if self._player else 0
+
+        if (
+            now - self._last_backlog_log_at >= 5.0
+            and (pending_events > 0 or pending_mic > 0 or pending_player_bytes > 0)
+        ):
+            self._log_event(
+                "backlog",
+                rt_events=pending_events,
+                mic_chunks=pending_mic,
+                player_bytes=pending_player_bytes,
+            )
+            self._last_backlog_log_at = now
+
+        if self._player:
+            if pending_player_bytes != self._last_player_buffer_bytes:
+                self._last_player_progress_at = now
+                self._last_player_buffer_bytes = pending_player_bytes
+            elif pending_player_bytes > 0 and now - self._last_player_progress_at > 8.0:
+                self._log_event("watchdog", message="audio playback stagnuje", buffered_bytes=pending_player_bytes)
+                try:
+                    self._player.stop()
+                except Exception:
+                    pass
+                self._last_player_progress_at = now
+                self._last_player_buffer_bytes = 0
+
+        if (
+            self._mode != "idle"
+            and self._rt is not None
+            and self._rt.is_connected
+            and self._ui_state in {_STATE_CONNECTING, _STATE_RECONNECTING, _STATE_TRANSCRIBING, _STATE_THINKING}
+            and now - self._last_server_activity_at > 25.0
+        ):
+            self._log_event("watchdog", message="realtime bez aktivity", state=self._ui_state)
+            self._schedule_reconnect("watchdog: realtime bez aktivity")
 
     def _start_rt_loop(self) -> None:
         if self._rt_loop_thread and self._rt_loop_thread.is_alive():
@@ -464,6 +564,7 @@ class ConversationWorker(QObject):
                 self._attempt_reconnect_if_needed()
                 if self._rt:
                     self._rt.pump_events()
+                self._check_runtime_health()
 
                 # Mic streaming + input level.
                 if self._mic_enabled.is_set() and self._mic is not None and self._rt is not None:
@@ -561,7 +662,7 @@ class ConversationWorker(QObject):
         self._next_reconnect_at = 0.0
         self.input_level.emit(0.0)
         self.output_level.emit(0.0)
-        self._set_state("idle")
+        self._set_state(_STATE_IDLE)
         self._end_session()
 
     # -------- Hands-free mode --------
@@ -575,6 +676,7 @@ class ConversationWorker(QObject):
             if self._resolved_input_device is None or self._resolved_output_device is None:
                 raise RuntimeError("Nenalezen mikrofon nebo výstupní zařízení.\n\n" + format_device_help())
             self._ensure_player()
+            self._set_state(_STATE_CONNECTING)
             rt = self._ensure_realtime("server_vad")
             self._start_rt_loop()
             self._mic = RealtimeMicStream(samplerate=24000, device=self._resolved_input_device)
@@ -584,11 +686,11 @@ class ConversationWorker(QObject):
                     f"Mikrofon jede na {self._mic.input_samplerate} Hz, resampluji na 24000 Hz."
                 )
             self._mic_enabled.set()
-            self._set_state("listening")
+            self._set_state(_STATE_LISTENING)
             self._append_caption("Hands-free: Realtime aktivní (server VAD).")
         except Exception as e:
-            self._set_state("error")
-            self.error.emit(str(e))
+            self._set_state(_STATE_ERROR)
+            self.error.emit(_sanitize_text(str(e)))
 
 
     @Slot()
@@ -602,6 +704,7 @@ class ConversationWorker(QObject):
             if self._resolved_input_device is None or self._resolved_output_device is None:
                 raise RuntimeError("Nenalezen mikrofon nebo výstupní zařízení.\n\n" + format_device_help())
             self._ensure_player()
+            self._set_state(_STATE_CONNECTING)
             rt = self._ensure_realtime("ptt")
             self._start_rt_loop()
             rt.clear_input_audio()
@@ -612,11 +715,11 @@ class ConversationWorker(QObject):
                     f"Mikrofon jede na {self._mic.input_samplerate} Hz, resampluji na 24000 Hz."
                 )
             self._mic_enabled.set()
-            self._set_state("listening")
+            self._set_state(_STATE_LISTENING)
             self._append_caption("PTT: poslouchám…")
         except Exception as e:
-            self._set_state("error")
-            self.error.emit(str(e))
+            self._set_state(_STATE_ERROR)
+            self.error.emit(_sanitize_text(str(e)))
 
 
     @Slot()
@@ -634,7 +737,7 @@ class ConversationWorker(QObject):
         # Commit input audio and ask for a response.
         # We show "transcribing" until the server emits the transcript.
         self._awaiting_transcript = True
-        self._set_state("transcribing")
+        self._set_state(_STATE_TRANSCRIBING)
         self._rt.commit_input_audio()
         self._rt.request_response()
         self._append_caption("PTT: čekám na odpověď…")
@@ -720,6 +823,7 @@ class MainWindow(QMainWindow):
         self.btn_settings = QPushButton("Nastavení")
         self.btn_openai = QPushButton("OpenAI")
         self.btn_save = QPushButton("Uložit")
+        self.btn_clear = QPushButton("Vyčistit relaci")
         self.btn_exit = QPushButton("Konec")
 
         self.btn_settings.setProperty("variant", "primary")
@@ -728,6 +832,7 @@ class MainWindow(QMainWindow):
         header.addWidget(self.btn_openai)
         header.addWidget(self.btn_settings)
         header.addWidget(self.btn_save)
+        header.addWidget(self.btn_clear)
         header.addSpacing(8)
         header.addWidget(self.btn_exit)
 
@@ -778,6 +883,7 @@ class MainWindow(QMainWindow):
         self.btn_openai.clicked.connect(lambda _=False: self._open_openai_dialog())
         self.btn_settings.clicked.connect(lambda _=False: self._open_settings_dialog())
         self.btn_save.clicked.connect(lambda _=False: self._save_defaults())
+        self.btn_clear.clicked.connect(lambda _=False: self._clear_session())
 
         self.orb.orb_clicked.connect(self._on_orb_click)
         self.orb.reset_clicked.connect(self._on_orb_reset)
@@ -829,6 +935,19 @@ class MainWindow(QMainWindow):
     def _save_defaults(self) -> None:
         self.settings.save()
         QMessageBox.information(self, "SAVE", "Aktuální nastavení bylo uloženo jako výchozí.")
+
+    def _clear_session(self) -> None:
+        try:
+            self.sig_request_stop.emit()
+        except Exception:
+            pass
+        self.captions.setText("")
+        self._handsfree_running = False
+        self.globe.setEnabled(True)
+        self.orb.set_running(False)
+        self.orb.set_error_text("")
+        if not self.settings.openai_api_key:
+            self.captions.setText("Chybí OpenAI API key. Otevřete dialog OpenAI a vložte klíč.")
 
     @Slot()
     def _on_orb_click(self) -> None:
@@ -886,6 +1005,8 @@ class MainWindow(QMainWindow):
             self._handsfree_running = False
             self.globe.setEnabled(True)
             self.orb.set_running(False)
+        elif s in {_STATE_CONNECTING, _STATE_RECONNECTING}:
+            self.globe.setEnabled(False)
         else:
             # Clear stale error message.
             self.orb.set_error_text("")
@@ -922,10 +1043,15 @@ def main() -> None:
         install_app_logging(log_dir=settings.ensure_log_dir(), session_tag=session_tag)
     except Exception:
         pass
+    asset_issues = verify_asset_manifest()
+    if asset_issues:
+        raise RuntimeError("Integrita assetů selhala: " + "; ".join(asset_issues))
 
     app = QApplication(sys.argv)
     app.setStyleSheet(app_stylesheet())
     w = MainWindow(settings)
+    if not settings.openai_api_key:
+        QTimer.singleShot(0, lambda: w.captions.setText("Chybí OpenAI API key. Otevřete dialog OpenAI a vložte klíč."))
     w.showMaximized()
     sys.exit(app.exec())
 

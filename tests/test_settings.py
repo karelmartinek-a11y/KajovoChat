@@ -46,3 +46,28 @@ def test_load_migrates_legacy_and_clamps_tts_speed(monkeypatch) -> None:
         assert settings.tts_speed == 1.5
         assert settings.tts_voice == "alloy"
         assert settings.language == "cs"
+
+
+def test_load_recovers_from_broken_settings_file(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+        config_dir = Path(temp_dir) / "cfg"
+        config_dir.mkdir()
+        config_path = config_dir / "settings.json"
+        config_path.write_text("{ broken json", encoding="utf-8")
+
+        monkeypatch.setattr("kajovochat.settings._config_path", lambda: config_path)
+        monkeypatch.setattr("kajovochat.settings._config_dir", lambda: config_dir)
+
+        settings = AppSettings.load()
+
+        assert settings.realtime_model == "gpt-realtime"
+        assert settings.write_logs is True
+        assert list(config_dir.glob("settings.json.broken-*"))
+        assert config_path.exists()
+
+
+def test_validate_log_dir_creates_writable_probe() -> None:
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+        settings = AppSettings(log_dir=str(temp_dir))
+        resolved = settings.validate_log_dir()
+        assert resolved == Path(temp_dir).resolve()

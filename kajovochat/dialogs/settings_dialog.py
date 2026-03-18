@@ -143,8 +143,12 @@ class SettingsDialog(QDialog):
         # Logs directory
         self._log_dir = QLineEdit(settings.log_dir)
         self._log_dir.setReadOnly(True)
+        self._write_logs = QCheckBox("Ukládat technické logy relace")
+        self._write_logs.setChecked(bool(settings.write_logs))
         self._log_conversations = QCheckBox("Ukládat obsah konverzace do logů")
         self._log_conversations.setChecked(bool(settings.log_conversations))
+        self._log_conversations.setEnabled(bool(settings.write_logs))
+        self._write_logs.toggled.connect(self._log_conversations.setEnabled)
         pick = QPushButton("Vybrat…")
         pick.clicked.connect(lambda _=False: self._pick_dir())
 
@@ -188,6 +192,7 @@ class SettingsDialog(QDialog):
         dir_row.addWidget(self._log_dir, 1)
         dir_row.addWidget(pick)
         form.addRow("Adresář logů:", dir_row)
+        form.addRow("", self._write_logs)
         form.addRow("", self._log_conversations)
 
         box = QGroupBox("Nastavení")
@@ -469,9 +474,11 @@ class SettingsDialog(QDialog):
 
         # log dir
         self.settings.log_dir = self._log_dir.text().strip() or self.settings.log_dir
-        self.settings.log_conversations = bool(self._log_conversations.isChecked())
+        self.settings.write_logs = bool(self._write_logs.isChecked())
+        self.settings.log_conversations = bool(self._write_logs.isChecked() and self._log_conversations.isChecked())
         try:
-            self.settings.ensure_log_dir()
+            if self.settings.write_logs:
+                self.settings.validate_log_dir()
         except Exception:
             pass
 
