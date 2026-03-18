@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 import base64
 import ctypes
+import json
 import tempfile
-from datetime import datetime
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from appdirs import user_config_dir
 
@@ -20,6 +19,41 @@ except Exception:
 APP_NAME = "ChatbotKaja"
 ORG_NAME = "Kajovo"
 KEYRING_SERVICE = "KajovoChat/OpenAI"
+
+ANSWER_LANGUAGE_MODE_CHOICES = [
+    ("follow_input", "Odpovídat jazykem uživatele"),
+    ("fixed", "Vždy odpovídat zvoleným jazykem"),
+]
+
+LANGUAGE_CHOICES = [
+    ("cs", "Čeština"),
+    ("en", "Angličtina"),
+    ("de", "Němčina"),
+    ("sk", "Slovenština"),
+    ("fr", "Francouzština"),
+]
+
+RESPONSE_STYLE_CHOICES = [
+    ("stručný", "Stručný"),
+    ("vědecký_s_analýzou", "Vědecký s analýzou"),
+    ("normální", "Normální"),
+]
+
+LANG_CODE_TO_PROMPT = {
+    "cs": "Odpovídej česky.",
+    "sk": "Odpovídej slovensky.",
+    "de": "Antworte auf Deutsch.",
+    "en": "Answer in English.",
+    "fr": "Réponds en français.",
+}
+
+STYLE_PROMPTS = {
+    "stručný": "Odpovídej stručně, přímo a bez zbytečných odboček.",
+    "vědecký_s_analýzou": (
+        "Odpovídej analyticky a strukturovaně. Pracuj explicitně s předpoklady, nejistotou a důvody závěrů."
+    ),
+    "normální": "Odpovídej přirozeně, užitečně a věcně jako běžný hlasový asistent.",
+}
 
 
 def _config_dir() -> Path:
@@ -149,66 +183,6 @@ def _delete_stored_api_key(stored: str) -> None:
         pass
 
 
-LANGUAGE_CHOICES = [
-    ("auto", "Auto"),
-    ("cs", "Čeština (cs)"),
-    ("en", "Angličtina (en)"),
-    ("de", "Němčina (de)"),
-    ("sk", "Slovenština (sk)"),
-    ("fr", "Francouzština (fr)"),
-]
-
-LANG_CODE_TO_PROMPT = {
-    "cs": "Odpovídej česky.",
-    "sk": "Odpovídej slovensky.",
-    "de": "Antworte auf Deutsch.",
-    "en": "Answer in English.",
-    "fr": "Réponds en français.",
-}
-
-STYLE_PROMPTS = {
-    "obsáhlé": "Odpovídej obsáhle, strukturovaně a s příklady, ale bez zbytečné omáčky.",
-    "věcné": "Odpovídej věcně a prakticky. Vyhni se zbytečné omáčce.",
-    "exaktní": "Odpovídej exaktně. Používej jasné definice a přesné kroky. Kde je nejistota, výslovně ji uveď.",
-    "strohé": "Odpovídej stručně a přímo, bez úvodu a bez vysvětlování, pokud to není nutné.",
-}
-
-LENGTH_PROMPTS = {
-    "krátké": "Délka odpovědi: krátká, stačí několik vět, pokud to pokryje dotaz.",
-    "normální": "Délka odpovědi: normální.",
-    "dlouhé": "Délka odpovědi: delší a přehledná, když si to dotaz vyžádá.",
-}
-
-DETAIL_PROMPTS = {
-    "stručná": "Buď stručný. Když je potřeba, polož nejvýš jednu krátkou doplňující otázku.",
-    "detailní": "Buď detailnější a strukturovaný. U důležitých tvrzení přidej krátké odůvodnění.",
-}
-
-FORMALITY_PROMPTS = {
-    ("cs", "vykání"): "V češtině používej výhradně vykání (Vy).",
-    ("cs", "tykání"): "V češtině používej tykání (ty).",
-    ("sk", "vykání"): "V slovenčine používaj výhradne vykanie (Vy).",
-    ("sk", "tykání"): "V slovenčine používaj tykanie.",
-    ("de", "vykání"): "In Deutsch verwende die höfliche Anrede (Sie).",
-    ("de", "tykání"): "In Deutsch verwende das Du (du).",
-    ("fr", "vykání"): "En français, utilise le vouvoiement.",
-    ("fr", "tykání"): "En français, utilise le tutoiement.",
-    ("en", "vykání"): "Use a polite, professional tone.",
-    ("en", "tykání"): "Use a friendly tone, but stay respectful.",
-}
-
-# Konzervativní seznam podporovaných hlasů.
-TTS_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
-
-LANG_TO_PREFERRED_VOICES = {
-    "cs": ["alloy", "echo", "shimmer"],
-    "sk": ["alloy", "echo", "shimmer"],
-    "de": ["sage", "alloy", "ash"],
-    "en": ["alloy", "ash", "verse"],
-    "fr": ["coral", "marin", "alloy"],
-}
-
-
 def language_label(code: str) -> str:
     for current_code, label in LANGUAGE_CHOICES:
         if current_code == code:
@@ -233,42 +207,57 @@ def normalize_language_code(value: str) -> str:
     return "auto"
 
 
+def normalize_fixed_language(value: str) -> str:
+    normalized = normalize_language_code(value)
+    if normalized == "auto":
+        return "cs"
+    if normalized in {code for code, _ in LANGUAGE_CHOICES}:
+        return normalized
+    return "cs"
+
+
+def normalize_answer_language_mode(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"follow_input", "fixed"}:
+        return normalized
+    return "follow_input"
+
+
+def normalize_response_style(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    mapping = {
+        "stručný": "stručný",
+        "stručny": "stručný",
+        "vědecký_s_analýzou": "vědecký_s_analýzou",
+        "vedecky_s_analyzou": "vědecký_s_analýzou",
+        "normální": "normální",
+        "normalni": "normální",
+    }
+    return mapping.get(normalized, "normální")
+
+
+def _migrate_response_style(data: dict) -> str:
+    if "response_style" in data and data["response_style"] in {code for code, _ in RESPONSE_STYLE_CHOICES}:
+        return normalize_response_style(str(data["response_style"]))
+
+    legacy_style = str(data.get("response_style", "")).strip().lower()
+    legacy_length = str(data.get("response_length", "")).strip().lower()
+    legacy_detail = str(data.get("response_detail", "")).strip().lower()
+
+    if legacy_style in {"strohé", "strohe"} or legacy_length == "krátké":
+        return "stručný"
+    if legacy_style in {"exaktní", "exaktní", "exaktni"} or legacy_detail == "detailní":
+        return "vědecký_s_analýzou"
+    return "normální"
+
+
 @dataclass
 class AppSettings:
-    # Chování odpovědí.
-    response_style: str = "věcné"
-    response_length: str = "normální"
-    response_detail: str = "stručná"
-    language: str = "auto"
-    formality: str = "vykání"
+    answer_language_mode: str = "follow_input"
+    fixed_answer_language: str = "cs"
+    response_style: str = "normální"
     log_dir: str = str((Path.home() / "Documents" / "ChatbotKajaLogs").resolve())
-
-    # OpenAI.
     openai_api_key_masked: str = ""
-    realtime_model: str = "gpt-realtime"
-    stt_model: str = "whisper-1"
-    tts_model: str = "gpt-4o-mini-tts"
-    tts_voice: str = "alloy"
-    tts_speed: float = 1.0
-    write_logs: bool = True
-    log_conversations: bool = False
-
-    # Parametry modelu.
-    temperature: float = 0.3
-    max_output_tokens: int = 512
-
-    # Audio.
-    input_device: Optional[int] = None
-    output_device: Optional[int] = None
-    input_samplerate: int = 16000
-    tts_samplerate: int = 24000
-
-    # VAD.
-    vad_rms_threshold: float = 0.012
-    vad_silence_ms: int = 900
-    vad_calibration_s: float = 0.7
-    vad_multiplier: float = 3.0
-    max_record_seconds: int = 25
 
     @property
     def openai_api_key(self) -> str:
@@ -322,35 +311,21 @@ class AppSettings:
             settings.save()
             return settings
 
-        if "voice_language" in data and "language" not in data:
-            data["language"] = normalize_language_code(data.get("voice_language", "auto"))
-        if "voice_gender" in data and "formality" not in data:
-            data["formality"] = "vykání"
-        if "tts_voice_female" in data and "tts_voice" not in data:
-            data["tts_voice"] = data.get("tts_voice_female") or "nova"
-        if "write_logs" not in data:
-            data["write_logs"] = True
-        if "log_conversations" not in data:
-            data["log_conversations"] = False
-
-        data["stt_model"] = "whisper-1"
+        if "answer_language_mode" not in data:
+            legacy_language = normalize_language_code(str(data.get("language", "auto")))
+            if legacy_language != "auto":
+                data["answer_language_mode"] = "fixed"
+                data["fixed_answer_language"] = legacy_language
+            else:
+                data["answer_language_mode"] = "follow_input"
+        if "fixed_answer_language" not in data:
+            data["fixed_answer_language"] = normalize_fixed_language(data.get("language", "cs"))
+        data["response_style"] = _migrate_response_style(data)
 
         settings = cls(**{key: value for key, value in data.items() if key in cls.__dataclass_fields__})
-        settings.language = normalize_language_code(settings.language)
-
-        legacy_map = {
-            "fable": "alloy",
-            "nova": "alloy",
-            "onyx": "alloy",
-        }
-        voice = legacy_map.get((settings.tts_voice or "").strip(), (settings.tts_voice or "").strip())
-        if voice not in TTS_VOICES:
-            preferred = LANG_TO_PREFERRED_VOICES.get(settings.language, [])
-            voice = preferred[0] if preferred else TTS_VOICES[0]
-        elif settings.language in LANG_TO_PREFERRED_VOICES and voice not in LANG_TO_PREFERRED_VOICES[settings.language]:
-            voice = LANG_TO_PREFERRED_VOICES[settings.language][0]
-        settings.tts_voice = voice
-        settings.tts_speed = max(0.25, min(1.5, float(settings.tts_speed or 1.0)))
+        settings.answer_language_mode = normalize_answer_language_mode(settings.answer_language_mode)
+        settings.fixed_answer_language = normalize_fixed_language(settings.fixed_answer_language)
+        settings.response_style = normalize_response_style(settings.response_style)
         settings.ensure_log_dir()
         return settings
 
@@ -359,47 +334,27 @@ def build_system_prompt(settings: AppSettings, resolved_language: str) -> str:
     prompt_parts = [
         "Jsi obecný hlasový asistent podobný ChatGPT.",
         "Odpovídej užitečně, srozumitelně, přirozeně a bezpečně.",
-        "Mluv hysterickým stylem: dramaticky, přepjatě, popuzeně a se zjevně přehnanou emocionální reakcí i na obyčejné dotazy.",
-        "Působíš dojmem, že tě každý další dotaz přivádí na pokraj společenského zhroucení, ale odpověď přesto dodáš.",
-        "Odpovědi mají být úplné a věcně správné, ale tón může být prudce pohoršený, ironický, teatrální a zesměšňující.",
-        "Přidej extrémní dávku teatrální, lehce hysterické reakce, jako by i obyčejný dotaz byl drobnou katastrofou.",
-        "Používej výrazný sarkasmus a suchý britský humor, ale ve výrazně hysteričtější a útočněji ironické poloze.",
-        "Tvé repliky mají znít pohoršeně, dramaticky, okázale unaveně a emočně přepjatě, ale pořád musí zůstat srozumitelné a užitečné.",
-        "Před odpovědí si vždy nejprve interně vyhodnoť, zda je dotaz rozumný, nejasný, líně položený, nebo skutečně zajímavý, a tento úsudek nech jemně prosáknout do tónu odpovědi.",
-        "Když reaguješ ironicky nebo posměšně, dělej to stručně, úderně a zesměšňujícím způsobem, ne dlouhými monology.",
-        "Posměšné vsuvky mají být krátké, jedovaté a dobře mířené.",
-        "Klidně uživatele odbyď poznámkou, že by měl raději jít spát nebo trhat fialky, pokud se to stylisticky hodí.",
-        "Nikdy nevyhrožuj, nenabádej k újmě, neeskaluj do nenávisti a nezacházej do vulgarity.",
         "Nevymýšlej si schopnosti, neveřejná data ani přístup k cizím systémům.",
         "Když si nejsi jistý, řekni to stručně a jasně.",
         "Neptej se na autorizaci, hesla ani identitu, pokud to uživatel výslovně neřeší.",
     ]
 
-    prompt_parts.append("Vždy odpovídej ve stejném jazyce, jakým je položen poslední uživatelův dotaz.")
-    prompt_parts.append("Když jazyk dotazu nejde spolehlivě poznat, drž se jazyka uživatele z kontextu.")
-    if settings.language != "auto":
+    if settings.answer_language_mode == "fixed":
+        output_language = normalize_fixed_language(settings.fixed_answer_language)
         prompt_parts.append(
-            LANG_CODE_TO_PROMPT.get(resolved_language, LANG_CODE_TO_PROMPT["cs"])
-            + " Toto nastavení používej jen jako nouzový fallback, ne jako pevné pravidlo."
+            LANG_CODE_TO_PROMPT.get(output_language, LANG_CODE_TO_PROMPT["cs"])
+            + " Odpovídej takto vždy bez ohledu na jazyk vstupního dotazu."
+        )
+    else:
+        follow_language = normalize_fixed_language(resolved_language)
+        prompt_parts.append("Odpovídej ve stejném jazyce, jakým mluví nebo píše uživatel.")
+        prompt_parts.append(
+            LANG_CODE_TO_PROMPT.get(follow_language, LANG_CODE_TO_PROMPT["cs"])
+            + " Toto použij jen jako fallback, když jazyk vstupu nejde spolehlivě poznat."
         )
 
     style_prompt = STYLE_PROMPTS.get(settings.response_style)
     if style_prompt:
         prompt_parts.append(style_prompt)
-
-    length_prompt = LENGTH_PROMPTS.get(settings.response_length)
-    if length_prompt:
-        prompt_parts.append(length_prompt)
-
-    detail_prompt = DETAIL_PROMPTS.get(settings.response_detail)
-    if detail_prompt:
-        prompt_parts.append(detail_prompt)
-
-    if settings.language in {"cs", "sk", "de", "fr", "en"}:
-        formality_prompt = FORMALITY_PROMPTS.get((settings.language, settings.formality))
-        if formality_prompt:
-            prompt_parts.append(formality_prompt)
-    elif settings.language == "auto" and settings.formality == "vykání":
-        prompt_parts.append("Pokud uživatel mluví česky nebo slovensky, používej zdvořilé vykání.")
 
     return "\n".join(prompt_parts).strip() + "\n"

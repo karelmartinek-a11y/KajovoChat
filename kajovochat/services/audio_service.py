@@ -200,7 +200,7 @@ def format_device_help() -> str:
             lines.append(f"  {d['index']}: {d['name']}")
     else:
         lines.append("Výstupy: (nenalezeno)")
-    lines.append("Tip: V Nastavení → Audio můžete vybrat konkrétní zařízení, nebo ponechat Default.")
+    lines.append("Tip: Aplikace používá systémová výchozí zařízení, případně interní heuristiku pro vestavěný mikrofon a reproduktory.")
     return "\n".join(lines)
 
 

@@ -4,22 +4,47 @@ import json
 import tempfile
 from pathlib import Path
 
-from kajovochat.settings import AppSettings, build_system_prompt
+from kajovochat.settings import (
+    AppSettings,
+    RESPONSE_STYLE_CHOICES,
+    build_system_prompt,
+)
 
 
-def test_settings_api_key_roundtrip_and_prompt() -> None:
-    settings = AppSettings(language="cs", response_style="věcné", response_length="normální", response_detail="stručná")
+def test_settings_api_key_roundtrip_and_prompt_follow_input() -> None:
+    settings = AppSettings(answer_language_mode="follow_input", fixed_answer_language="en", response_style="normální")
     settings.openai_api_key = "sk-test-123"
 
     assert settings.openai_api_key == "sk-test-123"
     assert settings.openai_api_key_masked
 
+    prompt = build_system_prompt(settings, "de")
+    assert "Odpovídej ve stejném jazyce" in prompt
+    assert "Antworte auf Deutsch." in prompt
+    assert "bez ohledu na jazyk vstupního dotazu" not in prompt
+
+
+def test_prompt_fixed_output_language() -> None:
+    settings = AppSettings(answer_language_mode="fixed", fixed_answer_language="fr", response_style="stručný")
     prompt = build_system_prompt(settings, "cs")
-    assert "Neptej se na autorizaci" in prompt
-    assert "Vždy odpovídej ve stejném jazyce" in prompt
+
+    assert "Réponds en français." in prompt
+    assert "bez ohledu na jazyk vstupního dotazu" in prompt
+    assert "Odpovídej ve stejném jazyce" not in prompt
 
 
-def test_load_migrates_legacy_and_clamps_tts_speed(monkeypatch) -> None:
+def test_prompt_styles_exact_three_presets() -> None:
+    assert [code for code, _ in RESPONSE_STYLE_CHOICES] == ["stručný", "vědecký_s_analýzou", "normální"]
+
+    scientific_prompt = build_system_prompt(
+        AppSettings(answer_language_mode="follow_input", fixed_answer_language="cs", response_style="vědecký_s_analýzou"),
+        "cs",
+    )
+    assert "analyticky a strukturovaně" in scientific_prompt
+    assert "hysterick" not in scientific_prompt.lower()
+
+
+def test_load_migrates_legacy_and_reduces_schema(monkeypatch) -> None:
     with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
         config_dir = Path(temp_dir) / "cfg"
         config_dir.mkdir()
@@ -31,6 +56,9 @@ def test_load_migrates_legacy_and_clamps_tts_speed(monkeypatch) -> None:
                     "tts_speed": 4.0,
                     "tts_voice": "nova",
                     "language": "česky",
+                    "response_style": "strohé",
+                    "temperature": 0.9,
+                    "max_output_tokens": 2048,
                 },
                 ensure_ascii=False,
             ),
@@ -43,9 +71,10 @@ def test_load_migrates_legacy_and_clamps_tts_speed(monkeypatch) -> None:
         settings = AppSettings.load()
 
         assert settings.openai_api_key == "sk-test-123"
-        assert settings.tts_speed == 1.5
-        assert settings.tts_voice == "alloy"
-        assert settings.language == "cs"
+        assert settings.answer_language_mode == "fixed"
+        assert settings.fixed_answer_language == "cs"
+        assert settings.response_style == "stručný"
+        assert not hasattr(settings, "temperature")
 
 
 def test_load_recovers_from_broken_settings_file(monkeypatch) -> None:
@@ -60,8 +89,8 @@ def test_load_recovers_from_broken_settings_file(monkeypatch) -> None:
 
         settings = AppSettings.load()
 
-        assert settings.realtime_model == "gpt-realtime"
-        assert settings.write_logs is True
+        assert settings.answer_language_mode == "follow_input"
+        assert settings.response_style == "normální"
         assert list(config_dir.glob("settings.json.broken-*"))
         assert config_path.exists()
 

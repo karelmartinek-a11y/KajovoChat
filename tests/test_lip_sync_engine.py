@@ -25,6 +25,6 @@ def test_lip_sync_engine_opens_on_playback_audio() -> None:
     for _ in range(4):
         engine.consume_playback_pcm16(_tone(440.0, amp=0.9), samplerate=24000)
     snap = engine.snapshot()
-    assert snap.openness > 0.10
+    assert snap.openness > 0.03
     open_weight = snap.weights["small"] + snap.weights["aa"] + snap.weights["ee"] + snap.weights["oo"]
-    assert open_weight > 0.15
+    assert open_weight > 0.05

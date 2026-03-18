@@ -4,16 +4,31 @@ Desktop aplikace v `PySide6` pro hlasovou konverzaci přes OpenAI Realtime API.
 
 ## Co aplikace umí
 
-- hlasový režim `hands-free` přes klik na hlavu asistenta
-- režim `push-to-talk` podržením zeměkoule
-- výběr modelu, hlasu, jazyka a audio zařízení v GUI
-- volitelné technické logování průběhu relace do uživatelského adresáře
-- kontrolu integrity binárních assetů při startu
+- hands-free hlasovou konverzaci přes klik na hlavu asistenta
+- push-to-talk přes tlačítko zeměkoule
+- photo-based talking head widget s lipsyncem podle skutečně přehrávaného audia
+- barge-in během mluvení asistenta
+- softwarové tlumení self-hearing na notebookových reproduktorech
+
+## Produktové nastavení
+
+V běžném dialogu `Nastavení` zůstávají jen tyto volby:
+
+- režim jazyka odpovědi
+  - odpovídat jazykem uživatele
+  - vždy odpovídat zvoleným jazykem
+- pevný jazyk odpovědi
+- styl odpovědi
+  - stručný
+  - vědecký s analýzou
+  - normální
+
+Model, hlas, VAD, rychlost výstupu a výběr audio zařízení jsou řízené interně.
 
 ## Požadavky
 
-- Python `3.11` až `3.14`
-- funkční mikrofon a reproduktor nebo sluchátka
+- Python `3.11+`
+- funkční mikrofon a reproduktory nebo sluchátka
 - platný OpenAI API klíč
 
 ## Instalace
@@ -32,23 +47,17 @@ Preferovaný vstupní bod:
 python -m kajovochat
 ```
 
-Kompatibilní alternativní vstupní bod:
+Alternativní vstupní bod:
 
 ```bash
 python app_gui.py
 ```
 
-Pomocný Windows skript:
+## OpenAI klíč
 
-```bat
-run_kajovochat.bat
-```
+Po spuštění otevřete dialog `OpenAI` a vložte API klíč. Klíč se ve Windows ukládá přes DPAPI, na ostatních platformách přes systémový keyring, pokud je dostupný.
 
-## Nastavení
-
-Po spuštění otevřete dialog `OpenAI` a vložte API klíč. Ostatní výchozí parametry lze upravit v dialogu `Nastavení`.
-
-Aplikace standardně funguje jako obecný hlasový asistent podobný ChatGPT. Nepoužívá žádnou pevnou autorizaci uživatele ani individuální scénář.
+## Konfigurace
 
 Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. Ve Windows typicky:
 
@@ -56,18 +65,22 @@ Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. Ve
 C:\Users\<uživatel>\AppData\Local\Kajovo\ChatbotKaja\settings.json
 ```
 
-OpenAI API klíč je ve Windows uložen přes DPAPI. Na ostatních platformách aplikace používá systémový keyring, pokud je dostupný. Obsah konverzací se do logů zapisuje jen pokud to výslovně povolíte v `Nastavení`.
+Technické logy se ukládají do:
+
+```text
+C:\Users\<uživatel>\Documents\ChatbotKajaLogs
+```
 
 ## Struktura projektu
 
 - `kajovochat/` hlavní aplikační balíček
-- `kajovochat/main.py` hlavní okno a orchestrace hlasové relace
-- `kajovochat/settings.py` perzistence nastavení a generování systémového promptu
-- `kajovochat/services/` OpenAI, audio, realtime websocket a logování
-- `kajovochat/dialogs/` dialogy nastavení a API klíče
-- `kajovochat/widgets/` vykreslované UI prvky včetně photo-based talking head widgetu
+- `kajovochat/main.py` GUI a orchestrace hlasové relace
+- `kajovochat/settings.py` minimální produktové nastavení a systémový prompt
+- `kajovochat/services/` audio, realtime websocket, OpenAI služby a logování
+- `kajovochat/dialogs/` dialog OpenAI a minimální dialog nastavení
+- `kajovochat/widgets/` vlastní UI widgety včetně photo-based talking head
 - `kajovochat/resources/assets/` obrázkové assety
-- `tests/` základní smoke testy
+- `tests/` testy
 
 ## Test a kontrola
 
@@ -76,7 +89,7 @@ python -m compileall -q kajovochat app_gui.py
 pytest -q
 ```
 
-## Poznámky
+## Omezení
 
-- API klíč se ukládá lokálně do uživatelského profilu aplikace.
-- Logy relací se ukládají mimo repozitář do uživatelského adresáře nastaveného v aplikaci.
+- self-hearing guard je čistě softwarový a bez systémového AEC nelze slíbit absolutní paritu s nativním ChatGPT Voice klientem
+- barge-in a anti-echo jsou laděné pro notebookový hands-free provoz, takže při velmi silném odposlechu z reproduktorů může být potřeba provozní test na konkrétním zařízení

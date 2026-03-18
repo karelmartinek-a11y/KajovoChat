@@ -7,7 +7,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import sounddevice as sd
 
@@ -28,12 +28,9 @@ from PySide6.QtWidgets import (
 from .settings import (
     AppSettings,
     build_system_prompt,
-    LANG_TO_PREFERRED_VOICES,
-    TTS_VOICES,
 )
 from .dialogs.settings_dialog import SettingsDialog
 from .dialogs.openai_dialog import OpenAIDialog
-from .services.openai_service import OpenAIService
 from .services.audio_service import (
     AudioPlayer,
     RealtimeMicStream,
@@ -69,6 +66,20 @@ _VALID_STATES = {
     _STATE_ERROR,
 }
 
+_REALTIME_MODEL = "gpt-realtime"
+_TTS_VOICE = "alloy"
+_TTS_SPEED = 1.0
+_NOISE_REDUCTION = "far_field"
+_SERVER_VAD_SILENCE_MS = 900
+_SERVER_VAD_PREFIX_MS = 300
+_SERVER_VAD_THRESHOLD = 0.72
+_PLAYBACK_ACTIVITY_LEVEL = 0.035
+_ECHO_TRAILING_HOLD_S = 0.28
+_ECHO_SIMILARITY_DROP = 0.82
+_ECHO_SIMILARITY_SOFT = 0.68
+_BARGE_IN_MIN_INPUT_LEVEL = 0.06
+_BARGE_IN_OUTPUT_RATIO = 1.35
+
 
 def _closed_pose_snapshot() -> dict[str, object]:
     return {
@@ -77,21 +88,6 @@ def _closed_pose_snapshot() -> dict[str, object]:
         "energy": 0.0,
         "weights": {"closed": 1.0, "small": 0.0, "aa": 0.0, "ee": 0.0, "oo": 0.0},
     }
-
-
-def _resolve_tts_voice(lang: str, preferred: str) -> Tuple[str, Optional[str]]:
-    """Return (voice, fallback_reason)."""
-    preferred = (preferred or "").strip()
-    if preferred in TTS_VOICES:
-        allowed = LANG_TO_PREFERRED_VOICES.get(lang)
-        if allowed and preferred not in allowed:
-            fallback = allowed[0]
-            return fallback, f"fallback_voice:{preferred}->{fallback}"
-        return preferred, None
-
-    allowed = LANG_TO_PREFERRED_VOICES.get(lang, [])
-    fallback = allowed[0] if allowed else (TTS_VOICES[0] if TTS_VOICES else "alloy")
-    return fallback, f"fallback_voice:{preferred}->{fallback}"
 
 
 def _sanitize_text(value: str) -> str:
@@ -132,6 +128,31 @@ def _pcm16_echo_similarity(mic_pcm: bytes, reference: object) -> float:
         return float(max(0.0, min(1.0, best)))
     except Exception:
         return 0.0
+
+
+def _should_drop_mic_chunk(
+    *,
+    mode: str,
+    guard_active: bool,
+    playback_active: bool,
+    similarity: float,
+    input_level: float,
+    output_level: float,
+) -> tuple[bool, str]:
+    if mode != "handsfree" or not guard_active:
+        return False, ""
+
+    strong_user = (
+        input_level >= _BARGE_IN_MIN_INPUT_LEVEL
+        and input_level >= max(_BARGE_IN_MIN_INPUT_LEVEL, output_level * _BARGE_IN_OUTPUT_RATIO)
+    )
+    if similarity >= _ECHO_SIMILARITY_DROP and not strong_user:
+        return True, "echo_similarity"
+    if playback_active and similarity >= _ECHO_SIMILARITY_SOFT and input_level <= max(0.045, output_level * 1.10):
+        return True, "echo_during_playback"
+    if playback_active and output_level >= 0.06 and input_level <= 0.025:
+        return True, "quiet_bleed"
+    return False, ""
 
 
 class ConversationWorker(QObject):
@@ -183,6 +204,11 @@ class ConversationWorker(QObject):
         self._last_player_progress_at = time.monotonic()
         self._last_player_buffer_bytes = 0
         self._mic_suppressed_until = 0.0
+        self._echo_drop_count = 0
+        self._barge_in_chunk_count = 0
+        self._last_echo_stat_log_at = 0.0
+        self._last_echo_drop_reported = 0
+        self._last_barge_in_reported = 0
 
         # Level signals are throttled to avoid saturating the Qt event loop.
         self._last_in_level: float = 0.0
@@ -229,11 +255,11 @@ class ConversationWorker(QObject):
     def _resolve_audio_devices(self) -> None:
         """Pick stable defaults for laptop mic + speakers.
 
-        Users can override in Settings. If Settings points to an invalid device,
-        we fall back to system default, then heuristic choice.
+        Produkt běží na systémových výchozích zařízeních, případně na interní
+        heuristice, pokud default selže.
         """
-        in_dev, in_note = pick_audio_device("input", self.settings.input_device)
-        out_dev, out_note = pick_audio_device("output", self.settings.output_device)
+        in_dev, in_note = pick_audio_device("input", None)
+        out_dev, out_note = pick_audio_device("output", None)
         self._resolved_input_device = in_dev
         self._resolved_output_device = out_dev
 
@@ -276,10 +302,7 @@ class ConversationWorker(QObject):
         normalized = (text or "").strip()
         if not normalized:
             return
-        if self.settings.log_conversations:
-            self._log_event(record_type, text=normalized)
-        else:
-            self._log_event(record_type, chars=len(normalized))
+        self._log_event(record_type, chars=len(normalized))
 
     def _set_caption_preview(self, prefix: str, text: str) -> None:
         base = self._captions.splitlines()[-11:]
@@ -300,11 +323,11 @@ class ConversationWorker(QObject):
         self._last_backlog_log_at = 0.0
         self._last_player_progress_at = time.monotonic()
         self._last_player_buffer_bytes = 0
-        if not self.settings.write_logs:
-            self._append_caption(
-                f"Relace: model={self.settings.realtime_model}, hlas={self.settings.tts_voice}, log obsahu=ne"
-            )
-            return
+        self._echo_drop_count = 0
+        self._barge_in_chunk_count = 0
+        self._last_echo_stat_log_at = 0.0
+        self._last_echo_drop_reported = 0
+        self._last_barge_in_reported = 0
         log_dir = self.settings.validate_log_dir()
         session_name = datetime.now().strftime("kajovochat_%Y%m%d_%H%M%S")
         self._logger = RealtimeLogWriter(log_dir=log_dir, session_name=session_name)
@@ -313,20 +336,20 @@ class ConversationWorker(QObject):
             "session_start",
             settings={
                 "openai_base_url": "wss://api.openai.com/v1/realtime",
-                "realtime_model": self.settings.realtime_model,
-                "language": self.settings.language,
-                "tts_voice": self.settings.tts_voice,
-                "tts_speed": self.settings.tts_speed,
-                "write_logs": bool(self.settings.write_logs),
-                "log_conversations": bool(self.settings.log_conversations),
+                "realtime_model": _REALTIME_MODEL,
+                "answer_language_mode": self.settings.answer_language_mode,
+                "fixed_answer_language": self.settings.fixed_answer_language,
+                "response_style": self.settings.response_style,
+                "tts_voice": _TTS_VOICE,
+                "tts_speed": _TTS_SPEED,
                 "audio": {
-                    "input_device": self.settings.input_device,
-                    "output_device": self.settings.output_device,
+                    "input_device": self._resolved_input_device,
+                    "output_device": self._resolved_output_device,
                 },
             },
         )
         self._append_caption(
-            f"Relace: model={self.settings.realtime_model}, hlas={self.settings.tts_voice}, log obsahu={'ano' if self.settings.log_conversations else 'ne'}"
+            f"Relace: model={_REALTIME_MODEL}, hlas={_TTS_VOICE}, jazyk={self.settings.answer_language_mode}, styl={self.settings.response_style}"
         )
 
     def _end_session(self) -> None:
@@ -344,38 +367,23 @@ class ConversationWorker(QObject):
             raise ValueError("Chybí API key")
         self._rt_turn_mode = turn_mode
 
-        # Odpovídej podle skutečně slyšeného jazyka; pevné nastavení ber jen jako fallback.
-        configured_lang = self.settings.language if self.settings.language in _ALLOWED_LANGS else "auto"
-        resolved = "auto"
-        self._resolved_lang = configured_lang if configured_lang != "auto" else "cs"
-
+        self._resolved_lang = self.settings.fixed_answer_language if self.settings.fixed_answer_language in _ALLOWED_LANGS else "cs"
         instructions = build_system_prompt(self.settings, self._resolved_lang)
-        voice, fallback_reason = _resolve_tts_voice(self._resolved_lang, self.settings.tts_voice)
-
-        # Keep within current Realtime constraints (speed max is 1.5).
-        try:
-            speed = float(self.settings.tts_speed)
-        except Exception:
-            speed = 1.0
-        speed = max(0.25, min(1.5, speed))
 
         cfg = RealtimeConfig(
             api_key=self.settings.openai_api_key,
-            model=self.settings.realtime_model,
+            model=_REALTIME_MODEL,
             instructions=instructions,
-            voice=voice,
+            voice=_TTS_VOICE,
             language_hint="auto",
             turn_mode=turn_mode,
             auto_interrupt=True,
-            noise_reduction="far_field",
-            output_speed=speed,
-            server_vad_silence_ms=int(self.settings.vad_silence_ms or 900),
-            server_vad_prefix_ms=300,
-            server_vad_threshold=0.72,
+            noise_reduction=_NOISE_REDUCTION,
+            output_speed=_TTS_SPEED,
+            server_vad_silence_ms=_SERVER_VAD_SILENCE_MS,
+            server_vad_prefix_ms=_SERVER_VAD_PREFIX_MS,
+            server_vad_threshold=_SERVER_VAD_THRESHOLD,
         )
-
-        if fallback_reason:
-            self._append_caption(f"Hlas: {fallback_reason}")
 
         if self._rt is None or not self._rt.is_connected:
             # Znovu vytvorit websocket po odpojeni.
@@ -390,14 +398,14 @@ class ConversationWorker(QObject):
 
         # Same websocket; update session settings.
         # Update extra audio/session knobs as well (update_session only touches a subset).
-        self._rt.cfg.noise_reduction = "far_field"
-        self._rt.cfg.output_speed = speed
-        self._rt.cfg.server_vad_silence_ms = int(self.settings.vad_silence_ms or 900)
-        self._rt.cfg.server_vad_prefix_ms = 300
-        self._rt.cfg.server_vad_threshold = 0.72
+        self._rt.cfg.noise_reduction = _NOISE_REDUCTION
+        self._rt.cfg.output_speed = _TTS_SPEED
+        self._rt.cfg.server_vad_silence_ms = _SERVER_VAD_SILENCE_MS
+        self._rt.cfg.server_vad_prefix_ms = _SERVER_VAD_PREFIX_MS
+        self._rt.cfg.server_vad_threshold = _SERVER_VAD_THRESHOLD
         self._rt.update_session(
             instructions=instructions,
-            voice=voice,
+            voice=_TTS_VOICE,
             language_hint="auto",
             turn_mode=turn_mode,
         )
@@ -575,6 +583,22 @@ class ConversationWorker(QObject):
             )
             self._last_backlog_log_at = now
 
+        if (
+            now - self._last_echo_stat_log_at >= 5.0
+            and (
+                self._echo_drop_count != self._last_echo_drop_reported
+                or self._barge_in_chunk_count != self._last_barge_in_reported
+            )
+        ):
+            self._log_event(
+                "echo_guard",
+                dropped_echo_chunks=self._echo_drop_count,
+                barge_in_chunks=self._barge_in_chunk_count,
+            )
+            self._last_echo_stat_log_at = now
+            self._last_echo_drop_reported = self._echo_drop_count
+            self._last_barge_in_reported = self._barge_in_chunk_count
+
         if self._player:
             if pending_player_bytes != self._last_player_buffer_bytes:
                 self._last_player_progress_at = now
@@ -620,12 +644,12 @@ class ConversationWorker(QObject):
                     except Exception:
                         current_out_level = 0.0
                         buffered = 0
-                    is_playing_out = buffered > 0 or current_out_level > 0.035 or self._ui_state == _STATE_SPEAKING
+                    is_playing_out = buffered > 0 or current_out_level > _PLAYBACK_ACTIVITY_LEVEL or self._ui_state == _STATE_SPEAKING
                     if is_playing_out:
-                        self._mic_suppressed_until = max(self._mic_suppressed_until, now_monotonic + 0.35)
-                suppress_mic = (
+                        self._mic_suppressed_until = max(self._mic_suppressed_until, now_monotonic + _ECHO_TRAILING_HOLD_S)
+                guard_active = (
                     self._mode == "handsfree"
-                    and now_monotonic < self._mic_suppressed_until
+                    and (is_playing_out or now_monotonic < self._mic_suppressed_until)
                 )
 
                 # Mic streaming + input level.
@@ -639,10 +663,36 @@ class ConversationWorker(QObject):
                         if chunk:
                             # Update last input VU level.
                             in_level = self._pcm16_level(chunk)
-                            if suppress_mic:
+                            similarity = 0.0
+                            if guard_active and self._player is not None:
+                                try:
+                                    reference = self._player.get_echo_reference(max_samples=max(4096, len(chunk) // 2 + 960))
+                                except Exception:
+                                    reference = b""
+                                similarity = _pcm16_echo_similarity(chunk, reference)
+                            drop_chunk, drop_reason = _should_drop_mic_chunk(
+                                mode=self._mode,
+                                guard_active=guard_active,
+                                playback_active=is_playing_out,
+                                similarity=similarity,
+                                input_level=in_level,
+                                output_level=current_out_level,
+                            )
+                            if drop_chunk:
+                                self._echo_drop_count += 1
                                 self._last_in_level = 0.0
+                                if self._echo_drop_count <= 3:
+                                    self._log_event(
+                                        "echo_drop",
+                                        reason=drop_reason,
+                                        similarity=round(similarity, 3),
+                                        input_level=round(in_level, 3),
+                                        output_level=round(current_out_level, 3),
+                                    )
                                 continue
                             self._last_in_level = in_level
+                            if is_playing_out and in_level >= max(_BARGE_IN_MIN_INPUT_LEVEL, current_out_level * _BARGE_IN_OUTPUT_RATIO):
+                                self._barge_in_chunk_count += 1
                             self._rt.append_audio_pcm16(chunk)
 
                 # Output level from the audio callback (reflects actual playback).
@@ -660,7 +710,7 @@ class ConversationWorker(QObject):
                 # Throttle signals to ~60Hz.
                 now = time.time()
                 if now - self._last_level_emit_t >= 0.016:
-                    in_lvl = self._last_in_level if (self._mic_enabled.is_set() and not suppress_mic) else 0.0
+                    in_lvl = self._last_in_level if self._mic_enabled.is_set() else 0.0
                     out_lvl = self._last_out_level
                     try:
                         self.input_level.emit(float(in_lvl))
@@ -708,6 +758,8 @@ class ConversationWorker(QObject):
         self._reconnect_attempts = 0
         self._next_reconnect_at = 0.0
         self._mic_suppressed_until = 0.0
+        self._echo_drop_count = 0
+        self._barge_in_chunk_count = 0
         self._end_session()
 
     @Slot()
@@ -736,6 +788,8 @@ class ConversationWorker(QObject):
         self._reconnect_attempts = 0
         self._next_reconnect_at = 0.0
         self._mic_suppressed_until = 0.0
+        self._echo_drop_count = 0
+        self._barge_in_chunk_count = 0
         self.input_level.emit(0.0)
         self.output_level.emit(0.0)
         self.output_pose.emit(_closed_pose_snapshot())
@@ -747,9 +801,9 @@ class ConversationWorker(QObject):
     @Slot()
     def start_handsfree(self) -> None:
         try:
-            self._start_session_if_needed()
             self._mode = "handsfree"
             self._resolve_audio_devices()
+            self._start_session_if_needed()
             if self._resolved_input_device is None or self._resolved_output_device is None:
                 raise RuntimeError("Nenalezen mikrofon nebo výstupní zařízení.\n\n" + format_device_help())
             self._ensure_player()
@@ -775,9 +829,9 @@ class ConversationWorker(QObject):
         if self._mode == "handsfree":
             return
         try:
-            self._start_session_if_needed()
             self._mode = "ptt"
             self._resolve_audio_devices()
+            self._start_session_if_needed()
             if self._resolved_input_device is None or self._resolved_output_device is None:
                 raise RuntimeError("Nenalezen mikrofon nebo výstupní zařízení.\n\n" + format_device_help())
             self._ensure_player()
@@ -979,26 +1033,9 @@ class MainWindow(QMainWindow):
         d.exec()
         self.settings.save()
 
-    def _load_models(self) -> List[str]:
-        if not self.settings.openai_api_key:
-            return []
-        svc = OpenAIService(self.settings.openai_api_key)
-        try:
-            models = svc.list_models()
-            realtime = [m for m in models if "realtime" in m.lower()]
-            if realtime:
-                return sorted(set(realtime))
-            return OpenAIService.filter_chat_models(models)
-        finally:
-            svc.close()
-
     def _open_settings_dialog(self) -> None:
         try:
-            d = SettingsDialog(
-                self.settings,
-                load_models_fn=self._load_models if self.settings.openai_api_key else None,
-                parent=self,
-            )
+            d = SettingsDialog(self.settings, parent=self)
             if d.exec():
                 d.apply()
                 self.settings.save()
