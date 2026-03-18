@@ -16,7 +16,7 @@ def test_settings_api_key_roundtrip_and_prompt() -> None:
 
     prompt = build_system_prompt(settings, "cs")
     assert "Neptej se na autorizaci" in prompt
-    assert "Odpovídej česky." in prompt
+    assert "Vždy odpovídej ve stejném jazyce" in prompt
 
 
 def test_load_migrates_legacy_and_clamps_tts_speed(monkeypatch) -> None:

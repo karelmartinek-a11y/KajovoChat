@@ -11,6 +11,10 @@
     "sha256": "c44975a7909e31abdbd0ad1d8969faec01434db44097e73728e855535079de33",
     "bytes": 227832
   },
+  "head_photo.png": {
+    "sha256": "938526273f2f72db7b54a47be86b2e2ef151775b2c5e03f6099aec4e5b90e717",
+    "bytes": 1180811
+  },
   "moon_hd.png": {
     "sha256": "372700bbf7757f910bb8f986db328af4f11dd8b260abd50fa75a21b760b8d900",
     "bytes": 4256998

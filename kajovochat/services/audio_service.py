@@ -16,6 +16,8 @@ import soundfile as sf
 from scipy import signal
 import math
 
+from .lip_sync_engine import LipSyncEngine
+
 
 def _resample_pcm16_mono(pcm16: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
     """Resample int16 mono PCM from src_rate to dst_rate.
@@ -352,6 +354,9 @@ class AudioPlayer:
         # Approximate current playback level (0..1). Updated in the audio
         # callback thread; read from UI/worker threads.
         self._level: float = 0.0
+        self._lip_sync = LipSyncEngine()
+        self._echo_reference = bytearray()
+        self._echo_reference_max_bytes = int(self.target_samplerate * 2 * 0.5)
 
     def _ensure_stream(self) -> None:
         if self._stream:
@@ -394,7 +399,7 @@ class AudioPlayer:
                 pcm = padded
             outdata[:, 0] = pcm
 
-            # Track output loudness for UI (orb animation). Keep this lightweight.
+            # Sleduj výstupní hlasitost pro UI animaci hlavy. Musí to být lehké.
             try:
                 rms = float(np.sqrt(np.mean(pcm * pcm) + 1e-12))
                 peak = float(np.max(np.abs(pcm))) if pcm.size else 0.0
@@ -402,6 +407,18 @@ class AudioPlayer:
                 self._level = float(max(0.0, min(1.0, lvl)))
             except Exception:
                 self._level = 0.0
+            try:
+                played = np.clip(pcm * 32767.0, -32768.0, 32767.0).astype(np.int16, copy=False)
+                self._lip_sync.consume_playback_pcm16(played.tobytes(), samplerate=self.samplerate)
+                echo_ref = played
+                if self.samplerate != self.target_samplerate:
+                    echo_ref = _resample_pcm16_mono(played, self.samplerate, self.target_samplerate)
+                with self._lock:
+                    self._echo_reference.extend(echo_ref.tobytes())
+                    if len(self._echo_reference) > self._echo_reference_max_bytes:
+                        del self._echo_reference[: len(self._echo_reference) - self._echo_reference_max_bytes]
+            except Exception:
+                pass
 
         last_err: Optional[Exception] = None
         for rate in try_rates:
@@ -443,7 +460,9 @@ class AudioPlayer:
 
         with self._lock:
             self._closed = False
+            self._echo_reference.clear()
         self._level = 0.0
+        self._lip_sync.reset()
 
     def get_level(self) -> float:
         """Return approximate current playback level in range 0..1."""
@@ -451,6 +470,34 @@ class AudioPlayer:
             return float(self._level)
         except Exception:
             return 0.0
+
+    def get_lipsync_snapshot(self) -> dict[str, object]:
+        try:
+            snap = self._lip_sync.snapshot()
+            return {
+                "pose": snap.pose,
+                "openness": snap.openness,
+                "energy": snap.energy,
+                "weights": dict(snap.weights),
+            }
+        except Exception:
+            return {
+                "pose": "closed",
+                "openness": 0.0,
+                "energy": 0.0,
+                "weights": {"closed": 1.0, "small": 0.0, "aa": 0.0, "ee": 0.0, "oo": 0.0},
+            }
+
+    def get_echo_reference(self, max_samples: int = 4096) -> np.ndarray:
+        try:
+            need_bytes = max(1, int(max_samples)) * 2
+            with self._lock:
+                tail = bytes(self._echo_reference[-need_bytes:])
+            if not tail:
+                return np.zeros((0,), dtype=np.int16)
+            return np.frombuffer(tail, dtype=np.int16).copy()
+        except Exception:
+            return np.zeros((0,), dtype=np.int16)
 
     @property
     def buffered_bytes(self) -> int:

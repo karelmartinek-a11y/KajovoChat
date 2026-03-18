@@ -4,7 +4,7 @@ Desktop aplikace v `PySide6` pro hlasovou konverzaci přes OpenAI Realtime API.
 
 ## Co aplikace umí
 
-- hlasový režim `hands-free` přes klik na měsíc
+- hlasový režim `hands-free` přes klik na hlavu asistenta
 - režim `push-to-talk` podržením zeměkoule
 - výběr modelu, hlasu, jazyka a audio zařízení v GUI
 - volitelné technické logování průběhu relace do uživatelského adresáře
@@ -65,7 +65,7 @@ OpenAI API klíč je ve Windows uložen přes DPAPI. Na ostatních platformách 
 - `kajovochat/settings.py` perzistence nastavení a generování systémového promptu
 - `kajovochat/services/` OpenAI, audio, realtime websocket a logování
 - `kajovochat/dialogs/` dialogy nastavení a API klíče
-- `kajovochat/widgets/` vykreslované UI prvky
+- `kajovochat/widgets/` vykreslované UI prvky včetně photo-based talking head widgetu
 - `kajovochat/resources/assets/` obrázkové assety
 - `tests/` základní smoke testy
 

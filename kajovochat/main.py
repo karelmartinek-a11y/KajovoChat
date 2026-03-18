@@ -44,7 +44,7 @@ from .services.realtime_service import RealtimeConfig, RealtimeService
 from .services.log_service import RealtimeLogWriter
 from .services.app_logging import install_app_logging
 from .resources.assets import verify_asset_manifest
-from .widgets.orb_widget import OrbWidget
+from .widgets.head_widget import HeadWidget
 from .widgets.globe_button import GlobeButton
 from .theme import Theme, app_stylesheet
 
@@ -70,6 +70,15 @@ _VALID_STATES = {
 }
 
 
+def _closed_pose_snapshot() -> dict[str, object]:
+    return {
+        "pose": "closed",
+        "openness": 0.0,
+        "energy": 0.0,
+        "weights": {"closed": 1.0, "small": 0.0, "aa": 0.0, "ee": 0.0, "oo": 0.0},
+    }
+
+
 def _resolve_tts_voice(lang: str, preferred: str) -> Tuple[str, Optional[str]]:
     """Return (voice, fallback_reason)."""
     preferred = (preferred or "").strip()
@@ -93,6 +102,38 @@ def _sanitize_text(value: str) -> str:
     return text
 
 
+def _pcm16_echo_similarity(mic_pcm: bytes, reference: object) -> float:
+    try:
+        import numpy as _np
+
+        mic = _np.frombuffer(mic_pcm, dtype=_np.int16).astype(_np.float32)
+        ref = _np.asarray(reference, dtype=_np.int16).astype(_np.float32).reshape(-1)
+        if mic.size < 120 or ref.size < mic.size:
+            return 0.0
+
+        mic = mic - float(_np.mean(mic))
+        mic_norm = float(_np.linalg.norm(mic) + 1e-6)
+        if mic_norm <= 1e-6:
+            return 0.0
+
+        best = 0.0
+        max_shift = min(max(0, ref.size - mic.size), 960)
+        for shift in range(0, max_shift + 1, 120):
+            segment = ref[ref.size - mic.size - shift : ref.size - shift if shift > 0 else ref.size]
+            if segment.size != mic.size:
+                continue
+            segment = segment - float(_np.mean(segment))
+            seg_norm = float(_np.linalg.norm(segment) + 1e-6)
+            if seg_norm <= 1e-6:
+                continue
+            corr = abs(float(_np.dot(mic, segment)) / (mic_norm * seg_norm))
+            if corr > best:
+                best = corr
+        return float(max(0.0, min(1.0, best)))
+    except Exception:
+        return 0.0
+
+
 class ConversationWorker(QObject):
     """Realtime speech-to-speech conversation (WebSocket).
 
@@ -105,9 +146,10 @@ class ConversationWorker(QObject):
     captions_updated = Signal(str)     # full captions text to show
     error = Signal(str)               # safe UI error message
 
-    # Real-time levels for orb animation (0..1).
+    # Realtime levely pro animaci hlavy (0..1).
     input_level = Signal(float)
     output_level = Signal(float)
+    output_pose = Signal(object)
 
     def __init__(self, settings: AppSettings) -> None:
         super().__init__()
@@ -140,6 +182,7 @@ class ConversationWorker(QObject):
         self._last_backlog_log_at = 0.0
         self._last_player_progress_at = time.monotonic()
         self._last_player_buffer_bytes = 0
+        self._mic_suppressed_until = 0.0
 
         # Level signals are throttled to avoid saturating the Qt event loop.
         self._last_in_level: float = 0.0
@@ -301,9 +344,10 @@ class ConversationWorker(QObject):
             raise ValueError("Chybí API key")
         self._rt_turn_mode = turn_mode
 
-        # Language used for instructions + transcription hint.
-        resolved = self.settings.language if self.settings.language in _ALLOWED_LANGS else "auto"
-        self._resolved_lang = "cs" if resolved == "auto" else resolved
+        # Odpovídej podle skutečně slyšeného jazyka; pevné nastavení ber jen jako fallback.
+        configured_lang = self.settings.language if self.settings.language in _ALLOWED_LANGS else "auto"
+        resolved = "auto"
+        self._resolved_lang = configured_lang if configured_lang != "auto" else "cs"
 
         instructions = build_system_prompt(self.settings, self._resolved_lang)
         voice, fallback_reason = _resolve_tts_voice(self._resolved_lang, self.settings.tts_voice)
@@ -320,14 +364,14 @@ class ConversationWorker(QObject):
             model=self.settings.realtime_model,
             instructions=instructions,
             voice=voice,
-            language_hint=resolved,
+            language_hint="auto",
             turn_mode=turn_mode,
             auto_interrupt=True,
             noise_reduction="far_field",
             output_speed=speed,
             server_vad_silence_ms=int(self.settings.vad_silence_ms or 900),
             server_vad_prefix_ms=300,
-            server_vad_threshold=0.60,
+            server_vad_threshold=0.72,
         )
 
         if fallback_reason:
@@ -350,11 +394,11 @@ class ConversationWorker(QObject):
         self._rt.cfg.output_speed = speed
         self._rt.cfg.server_vad_silence_ms = int(self.settings.vad_silence_ms or 900)
         self._rt.cfg.server_vad_prefix_ms = 300
-        self._rt.cfg.server_vad_threshold = 0.60
+        self._rt.cfg.server_vad_threshold = 0.72
         self._rt.update_session(
             instructions=instructions,
             voice=voice,
-            language_hint=cfg.language_hint,
+            language_hint="auto",
             turn_mode=turn_mode,
         )
         return self._rt
@@ -566,6 +610,24 @@ class ConversationWorker(QObject):
                     self._rt.pump_events()
                 self._check_runtime_health()
 
+                now_monotonic = time.monotonic()
+                current_out_level = 0.0
+                is_playing_out = False
+                if self._player is not None:
+                    try:
+                        current_out_level = float(self._player.get_level())
+                        buffered = self._player.buffered_bytes
+                    except Exception:
+                        current_out_level = 0.0
+                        buffered = 0
+                    is_playing_out = buffered > 0 or current_out_level > 0.035 or self._ui_state == _STATE_SPEAKING
+                    if is_playing_out:
+                        self._mic_suppressed_until = max(self._mic_suppressed_until, now_monotonic + 0.35)
+                suppress_mic = (
+                    self._mode == "handsfree"
+                    and now_monotonic < self._mic_suppressed_until
+                )
+
                 # Mic streaming + input level.
                 if self._mic_enabled.is_set() and self._mic is not None and self._rt is not None:
                     # Drain a few chunks per tick to reduce backlog.
@@ -576,25 +638,37 @@ class ConversationWorker(QObject):
                             break
                         if chunk:
                             # Update last input VU level.
-                            self._last_in_level = self._pcm16_level(chunk)
+                            in_level = self._pcm16_level(chunk)
+                            if suppress_mic:
+                                self._last_in_level = 0.0
+                                continue
+                            self._last_in_level = in_level
                             self._rt.append_audio_pcm16(chunk)
 
                 # Output level from the audio callback (reflects actual playback).
                 if self._player is not None:
                     try:
-                        self._last_out_level = float(self._player.get_level())
+                        self._last_out_level = current_out_level
+                        out_pose = self._player.get_lipsync_snapshot()
                     except Exception:
                         self._last_out_level = 0.0
+                        out_pose = _closed_pose_snapshot()
                 else:
                     self._last_out_level = 0.0
+                    out_pose = _closed_pose_snapshot()
 
                 # Throttle signals to ~60Hz.
                 now = time.time()
                 if now - self._last_level_emit_t >= 0.016:
-                    in_lvl = self._last_in_level if self._mic_enabled.is_set() else 0.0
+                    in_lvl = self._last_in_level if (self._mic_enabled.is_set() and not suppress_mic) else 0.0
                     out_lvl = self._last_out_level
-                    self.input_level.emit(float(in_lvl))
-                    self.output_level.emit(float(out_lvl))
+                    try:
+                        self.input_level.emit(float(in_lvl))
+                        self.output_level.emit(float(out_lvl))
+                        self.output_pose.emit(out_pose)
+                    except RuntimeError:
+                        self._rt_loop_stop.set()
+                        break
                     self._last_level_emit_t = now
                 time.sleep(0.005)
 
@@ -633,6 +707,7 @@ class ConversationWorker(QObject):
         self._awaiting_transcript = False
         self._reconnect_attempts = 0
         self._next_reconnect_at = 0.0
+        self._mic_suppressed_until = 0.0
         self._end_session()
 
     @Slot()
@@ -660,8 +735,10 @@ class ConversationWorker(QObject):
         self._stop_rt_loop()
         self._reconnect_attempts = 0
         self._next_reconnect_at = 0.0
+        self._mic_suppressed_until = 0.0
         self.input_level.emit(0.0)
         self.output_level.emit(0.0)
+        self.output_pose.emit(_closed_pose_snapshot())
         self._set_state(_STATE_IDLE)
         self._end_session()
 
@@ -858,18 +935,18 @@ class MainWindow(QMainWindow):
         center = QVBoxLayout()
         center.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
 
-        moon_path = str(Path(__file__).resolve().parent / "resources" / "assets" / "moon_hd.png")
+        head_path = str(Path(__file__).resolve().parent / "resources" / "assets" / "head_photo.png")
         earth_path = str(Path(__file__).resolve().parent / "resources" / "assets" / "earth_hd.png")
         earth_clouds_path = str(Path(__file__).resolve().parent / "resources" / "assets" / "earth_clouds_hd.png")
 
-        self.orb = OrbWidget(moon_path)
-        self.orb.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.orb.setMinimumSize(520, 520)
+        self.head = HeadWidget(head_path)
+        self.head.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.head.setMinimumSize(520, 520)
 
         self.globe = GlobeButton(earth_path, earth_clouds_path)
 
         center.addStretch(1)
-        center.addWidget(self.orb, 0, Qt.AlignHCenter)
+        center.addWidget(self.head, 0, Qt.AlignHCenter)
         center.addSpacing(14)
         center.addWidget(self.globe, 0, Qt.AlignHCenter)
         center.addStretch(2)
@@ -885,8 +962,8 @@ class MainWindow(QMainWindow):
         self.btn_save.clicked.connect(lambda _=False: self._save_defaults())
         self.btn_clear.clicked.connect(lambda _=False: self._clear_session())
 
-        self.orb.orb_clicked.connect(self._on_orb_click)
-        self.orb.reset_clicked.connect(self._on_orb_reset)
+        self.head.orb_clicked.connect(self._on_orb_click)
+        self.head.reset_clicked.connect(self._on_orb_reset)
         self.globe.ptt_pressed.connect(self._on_globe_press)
         self.globe.ptt_released.connect(self._on_globe_release)
 
@@ -895,6 +972,7 @@ class MainWindow(QMainWindow):
         self.worker.error.connect(self._on_error)
         self.worker.input_level.connect(self._on_input_level)
         self.worker.output_level.connect(self._on_output_level)
+        self.worker.output_pose.connect(self._on_output_pose)
 
     def _open_openai_dialog(self) -> None:
         d = OpenAIDialog(self.settings, self)
@@ -944,24 +1022,25 @@ class MainWindow(QMainWindow):
         self.captions.setText("")
         self._handsfree_running = False
         self.globe.setEnabled(True)
-        self.orb.set_running(False)
-        self.orb.set_error_text("")
+        self.head.set_running(False)
+        self.head.set_error_text("")
+        self.head.set_lipsync_snapshot(_closed_pose_snapshot())
         if not self.settings.openai_api_key:
             self.captions.setText("Chybí OpenAI API key. Otevřete dialog OpenAI a vložte klíč.")
 
     @Slot()
     def _on_orb_click(self) -> None:
-        # Orb toggles hands-free mode.
+        # Hlava přepíná hands-free režim.
         if self._handsfree_running:
             self.sig_request_stop.emit()
             self._handsfree_running = False
-            self.orb.set_running(False)
+            self.head.set_running(False)
             self.globe.setEnabled(True)
             return
 
         self.globe.setEnabled(False)
         self._handsfree_running = True
-        self.orb.set_running(True)
+        self.head.set_running(True)
         self.captions.setText("Hands-free: aktivní")  # immediate UI feedback
         self.sig_start_handsfree.emit()
 
@@ -974,16 +1053,21 @@ class MainWindow(QMainWindow):
             pass
         self._handsfree_running = False
         self.globe.setEnabled(True)
-        self.orb.set_running(False)
-        self.orb.set_error_text("")
+        self.head.set_running(False)
+        self.head.set_error_text("")
+        self.head.set_lipsync_snapshot(_closed_pose_snapshot())
 
     @Slot(float)
     def _on_input_level(self, lvl: float) -> None:
-        self.orb.set_input_level(lvl)
+        self.head.set_input_level(lvl)
 
     @Slot(float)
     def _on_output_level(self, lvl: float) -> None:
-        self.orb.set_output_level(lvl)
+        self.head.set_output_level(lvl)
+
+    @Slot(object)
+    def _on_output_pose(self, snapshot: object) -> None:
+        self.head.set_lipsync_snapshot(snapshot)
 
     @Slot()
     def _on_globe_press(self) -> None:
@@ -1000,16 +1084,16 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_state(self, s: str) -> None:
-        self.orb.set_state(s)
+        self.head.set_state(s)
         if s == "error":
             self._handsfree_running = False
             self.globe.setEnabled(True)
-            self.orb.set_running(False)
+            self.head.set_running(False)
         elif s in {_STATE_CONNECTING, _STATE_RECONNECTING}:
             self.globe.setEnabled(False)
         else:
             # Clear stale error message.
-            self.orb.set_error_text("")
+            self.head.set_error_text("")
 
     @Slot(str)
     def _on_captions(self, text: str) -> None:
@@ -1017,15 +1101,15 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_error(self, msg: str) -> None:
-        # Show error in the orb (with Reset). Keep captions as-is.
-        self.orb.set_error_text(msg)
+        # Chybu zobrazíme přímo ve widgetu hlavy a zachováme captions.
+        self.head.set_error_text(msg)
         self._handsfree_running = False
         self.globe.setEnabled(True)
-        self.orb.set_running(False)
+        self.head.set_running(False)
 
     def closeEvent(self, event) -> None:
         try:
-            self.sig_request_stop.emit()
+            self.worker.request_stop()
         except Exception:
             pass
         try:
