@@ -58,6 +58,8 @@ class RealtimeService:
         self._events: "queue.Queue[dict]" = queue.Queue()
         self._connected = threading.Event()
         self._closed = threading.Event()
+        self._last_close_code: Optional[int] = None
+        self._last_close_message: str = ""
 
         # Callbacks (set by caller)
         self.on_status: Optional[Callable[[str], None]] = None
@@ -87,6 +89,8 @@ class RealtimeService:
             if self.on_status:
                 self.on_status("Realtime: connected")
             self._connected.set()
+            self._last_close_code = None
+            self._last_close_message = ""
             # Configure session.
             self._send_session_update()
 
@@ -105,8 +109,11 @@ class RealtimeService:
         def _on_close(ws, status_code, close_msg):
             self._closed.set()
             self._connected.clear()
+            self._last_close_code = status_code
+            self._last_close_message = str(close_msg or "")
             if self.on_status:
-                self.on_status("Realtime: disconnected")
+                suffix = f" ({status_code})" if status_code is not None else ""
+                self.on_status(f"Realtime: disconnected{suffix}")
 
         self._ws = websocket.WebSocketApp(
             url,
@@ -137,17 +144,26 @@ class RealtimeService:
                 self._ws.close()
         except Exception:
             pass
+        try:
+            if self._ws_thread and self._ws_thread.is_alive():
+                self._ws_thread.join(timeout=1.5)
+        except Exception:
+            pass
+        self._ws = None
+        self._ws_thread = None
 
-    def _send(self, event: dict) -> None:
+    def _send(self, event: dict) -> bool:
         if not self._ws or not self.is_connected:
-            return
+            return False
         data = json.dumps(event, ensure_ascii=False)
         with self._send_lock:
             try:
                 self._ws.send(data)
+                return True
             except Exception as e:
                 if self.on_error:
                     self.on_error(str(e))
+                return False
 
     def _send_session_update(self) -> None:
         # Turn taking configuration.

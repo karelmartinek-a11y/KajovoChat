@@ -67,7 +67,7 @@ class OpenAIDialog(QDialog):
             QMessageBox.warning(self, "API key", "API key je prázdný.")
             return
         self.settings.openai_api_key = key
-        QMessageBox.information(self, "API key", "API key uložen do nastavení (lokálně v PC).")
+        QMessageBox.information(self, "API key", "API key byl uložen lokálně. Ve Windows je chráněn přes DPAPI.")
 
     def _delete_key(self) -> None:
         self._key.setText("")

@@ -57,27 +57,23 @@ class OpenAIService:
         return allow or models
 
     def _with_retry(self, fn, *, op: str):
-        # Transient errors: max 1 retry with exponential backoff.
-        # Invalid key: no retry.
-        try:
-            return fn()
-        except AuthenticationError as e:
-            raise InvalidApiKeyError("Neplatný API key.") from e
-        except (APITimeoutError, APIConnectionError) as e:
-            time.sleep(0.35)
+        # Přechodné chyby zkusíme několikrát s krátkým backoffem.
+        for attempt in range(3):
             try:
                 return fn()
-            except Exception as e2:
-                raise RuntimeError(f"{op} selhalo (timeout/connection).") from e2
-        except APIStatusError as e:
-            status = getattr(e, "status_code", None)
-            if status in (502, 503):
-                time.sleep(0.35)
-                try:
-                    return fn()
-                except Exception as e2:
-                    raise RuntimeError(f"{op} selhalo ({status}).") from e2
-            raise
+            except AuthenticationError as e:
+                raise InvalidApiKeyError("Neplatný API key.") from e
+            except (APITimeoutError, APIConnectionError) as e:
+                if attempt >= 2:
+                    raise RuntimeError(f"{op} selhalo (timeout/connection).") from e
+                time.sleep(0.35 * (2 ** attempt))
+            except APIStatusError as e:
+                status = getattr(e, "status_code", None)
+                if status in (429, 500, 502, 503, 504) and attempt < 2:
+                    time.sleep(0.35 * (2 ** attempt))
+                    continue
+                raise RuntimeError(f"{op} selhalo ({status or 'API'}).") from e
+        raise RuntimeError(f"{op} selhalo.")
 
     def transcribe_wav(self, wav_bytes: bytes, *, language_hint: Optional[str] = None) -> TranscriptionResult:
         # STT is fixed to Whisper.

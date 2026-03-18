@@ -1,48 +1,53 @@
 # Repository Guidelines
 
-## Jazyk komunikace (POVINNE)
-- AI agent **KOMUNIKUJE VYHRADNE V CESTINE**
-- Plati pro:
-  - popisy zmen
-  - commit zpravy
-  - tagy / milniky
-  - vystupy, vysvetleni, komentare
-  - dokumentaci
-📌 Anglictina je povolena pouze:
-- v samotnem aplikacnim kodu
-- v nazvech promennych, funkci a API
+## Jazyk komunikace
 
+- AI agent komunikuje s uživatelem výhradně česky, pokud uživatel výslovně neurčí jinak.
+- Dokumentace, poznámky a komentáře v kódu se píšou česky.
+- Zdrojový kód, názvy proměnných, funkcí a API mohou zůstat v angličtině.
 
+## Kódování souborů
 
-## Project Structure & Modules
-- `src/kajovospend/`: aplikační kód – databázové modely, service (watcher/processor), UI (Qt/PySide6) a utilitky.
-- `service_main.py`: start služby (filesystem watcher + job queue).
-- `app_gui.py`: desktop GUI klient.
-- `assets/`: ikony a grafika, `INPUT/` a `OUTPUT/` slouží jako pracovní adresáře.
-- `scripts/`: helpery (např. stažení OCR modelů, registrace služby).
-- `tests/`: připravené místo pro testy (zatím prázdné).
+- Všechny textové soubory musí být v `UTF-8 bez BOM`.
 
-## Setup, Build & Run
-- Vytvoř venv: `python -m venv .venv && .\\.venv\\Scripts\\activate` (Windows).
-- Závislosti: `pip install -r requirements.txt`.
-- Služba: `python service_main.py --config config.yaml` (watcher běží proti `paths.input_dir`).
-- GUI: `python app_gui.py` (načte/uloží `config.yaml`, komunikuje se službou).
+## Aktuální struktura projektu
 
-## Coding Style & Naming
-- Python 3.13+, preferuj typové anotace a f-strings.
-- Pojmenování: snake_case pro funkce/proměnné, PascalCase pro třídy; srozumitelné názvy bez zkratek.
-- U SQLAlchemy používej `select(...)` nebo `text(...)` pro raw SQL (nutné v UI money přehledech).
+- `kajovochat/` hlavní aplikace
+- `kajovochat/main.py` GUI a řízení hlasové relace
+- `kajovochat/settings.py` nastavení aplikace a systémový prompt
+- `kajovochat/services/` OpenAI služby, audio, realtime komunikace a logování
+- `kajovochat/dialogs/` dialogy pro nastavení a API klíč
+- `kajovochat/widgets/` vlastní UI widgety
+- `kajovochat/resources/assets/` assety pro GUI
+- `app_gui.py` kompatibilní alternativní vstupní bod
+- `run_kajovochat.bat` pomocný start skript pro Windows
+- `tests/` testy
 
-## Testing Guidelines
-- Preferuj `pytest`; umisťuj testy do `tests/` se jmény `test_*.py`.
-- Přidej rychlé smoke testy pro watcher a processor; u UI izoluj logiku do testovatelných funkcí.
-- Před PR spusť alespoň cílené testy: `pytest tests` (jakmile existují).
+## Spuštění
 
-## Commit & Pull Requests
-- Commity: stručný imperativ (`fix watcher polling on win`, `add money aggregates text()`). Drž jeden logický celek na commit.
-- PR: krátký popis problému + řešení, zmínit dopad na službu/GUI, přiložit příkazy/testy, relevantní screenshoty GUI.
-- GitHub repozitář: karelmartinek-a11y/KajovoSpend (přístupový token drž mimo verzování)
+- Vytvoření prostředí: `python -m venv .venv`
+- Aktivace ve Windows: `.\\.venv\\Scripts\\activate`
+- Instalace závislostí: `pip install -r requirements.txt`
+- Hlavní spuštění: `python -m kajovochat`
+- Alternativní spuštění: `python app_gui.py`
 
-## Security & Configuration Tips
-- Osobní tokeny (PAT) neukládej do repozitáře; používej git credential helper nebo `.env` (viz `.env.example`), který je ignorovaný.
-- Sdílené hodnoty dávej jen do šablon typu `config.example.yaml` nebo `.env.example`.
+## Styl kódu
+
+- Cílová verze Pythonu je `3.11+`.
+- Preferují se typové anotace a `f-string`.
+- Funkce a proměnné mají být `snake_case`, třídy `PascalCase`.
+- Každá změna má držet skutečný stav aplikace, bez historických nebo cizích artefaktů.
+
+## Testování
+
+- Používej `pytest`.
+- Testy patří do `tests/` a mají se jmenovat `test_*.py`.
+- Před odevzdáním změn spusť aspoň:
+  - `python -m compileall -q kajovochat app_gui.py`
+  - `pytest -q`
+
+## Bezpečnost a provoz
+
+- Do repozitáře nepatří provozní logy, cache, `__pycache__`, exporty dat ani lokální audity.
+- Do repozitáře nepatří API klíče ani jiné tajné údaje.
+- Repozitář má obsahovat jen zdrojový kód, potřebné assety, relevantní testy a aktuální dokumentaci.

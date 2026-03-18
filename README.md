@@ -1,27 +1,81 @@
-﻿# Chatbot Kája
+# Chatbot Kája
 
-Desktop aplikace (PySide6) pro hlasovou konverzaci s OpenAI Realtime (hands-free i push-to-talk).
+Desktop aplikace v `PySide6` pro hlasovou konverzaci přes OpenAI Realtime API.
 
-## Spuštění
+## Co aplikace umí
 
-1. Nainstalujte závislosti:
+- hlasový režim `hands-free` přes klik na měsíc
+- režim `push-to-talk` podržením zeměkoule
+- výběr modelu, hlasu, jazyka a audio zařízení v GUI
+- lokální logování průběhu relace do uživatelského adresáře
+
+## Požadavky
+
+- Python `3.11` až `3.14`
+- funkční mikrofon a reproduktor nebo sluchátka
+- platný OpenAI API klíč
+
+## Instalace
 
 ```bash
+python -m venv .venv
+.\.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-2. Spusťte aplikaci:
+## Spuštění
+
+Preferovaný vstupní bod:
 
 ```bash
 python -m kajovochat
 ```
 
-Alternativně lze použít i `python app_gui.py`.
+Kompatibilní alternativní vstupní bod:
+
+```bash
+python app_gui.py
+```
+
+Pomocný Windows skript:
+
+```bat
+run_kajovochat.bat
+```
 
 ## Nastavení
 
-API klíč a ostatní parametry se nastavují přímo v aplikaci přes dialog „Nastavení“.
+Po spuštění otevřete dialog `OpenAI` a vložte API klíč. Ostatní výchozí parametry lze upravit v dialogu `Nastavení`.
 
-## Forensic Reborne Audit
+Aplikace standardně funguje jako obecný hlasový asistent podobný ChatGPT. Nepoužívá žádnou pevnou autorizaci uživatele ani individuální scénář.
 
-2026-02-27: Proběhla konsolidace větví do `main`, která slouží jako nová baseline (Forensic Reborne Audit).
+Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. Ve Windows typicky:
+
+```text
+C:\Users\<uživatel>\AppData\Local\Kajovo\ChatbotKaja\settings.json
+```
+
+OpenAI API klíč je ve Windows uložen přes DPAPI. Obsah konverzací se do logů zapisuje jen pokud to výslovně povolíte v `Nastavení`.
+
+## Struktura projektu
+
+- `kajovochat/` hlavní aplikační balíček
+- `kajovochat/main.py` hlavní okno a orchestrace hlasové relace
+- `kajovochat/settings.py` perzistence nastavení a generování systémového promptu
+- `kajovochat/services/` OpenAI, audio, realtime websocket a logování
+- `kajovochat/dialogs/` dialogy nastavení a API klíče
+- `kajovochat/widgets/` vykreslované UI prvky
+- `kajovochat/resources/assets/` obrázkové assety
+- `tests/` základní smoke testy
+
+## Test a kontrola
+
+```bash
+python -m compileall -q kajovochat app_gui.py
+pytest -q
+```
+
+## Poznámky
+
+- API klíč se ukládá lokálně do uživatelského profilu aplikace.
+- Logy relací se ukládají mimo repozitář do uživatelského adresáře nastaveného v aplikaci.

@@ -50,19 +50,6 @@ from .theme import Theme, app_stylesheet
 _ALLOWED_LANGS = {"cs", "en", "de", "sk", "fr"}
 
 
-def _resolve_language(settings: AppSettings, stt_lang: Optional[str], last_lang: Optional[str]) -> str:
-    """Resolved language used for LLM+TTS.
-
-    - If settings.language != auto => fixed.
-    - If auto => use stt_lang when in allowed set, else last_lang, else cs.
-    """
-    if settings.language != "auto":
-        return settings.language
-    if stt_lang in _ALLOWED_LANGS:
-        return stt_lang
-    return last_lang if last_lang in _ALLOWED_LANGS else "cs"
-
-
 def _resolve_tts_voice(lang: str, preferred: str) -> Tuple[str, Optional[str]]:
     """Return (voice, fallback_reason)."""
     preferred = (preferred or "").strip()
@@ -115,6 +102,12 @@ class ConversationWorker(QObject):
 
         self._mode: str = "idle"  # "handsfree" | "ptt" | "idle"
         self._resolved_lang = "cs"
+        self._rt_turn_mode = "server_vad"
+        self._reconnect_attempts = 0
+        self._next_reconnect_at = 0.0
+        self._response_started_at: Optional[float] = None
+        self._response_first_audio_at: Optional[float] = None
+        self._speech_stopped_at: Optional[float] = None
 
         # Level signals are throttled to avoid saturating the Qt event loop.
         self._last_in_level: float = 0.0
@@ -192,6 +185,24 @@ class ConversationWorker(QObject):
         self._captions = "\n".join(self._captions.splitlines()[-12:])
         self.captions_updated.emit(self._captions)
 
+    def _log_event(self, record_type: str, **extra) -> None:
+        if not self._logger:
+            return
+        payload = {"type": record_type}
+        payload.update(extra)
+        self._logger.append(payload)
+        if self._logger.last_error:
+            self._append_caption(f"Logování: {self._logger.last_error}")
+
+    def _log_conversation_text(self, record_type: str, text: str) -> None:
+        normalized = (text or "").strip()
+        if not normalized:
+            return
+        if self.settings.log_conversations:
+            self._log_event(record_type, text=normalized)
+        else:
+            self._log_event(record_type, chars=len(normalized))
+
     def _set_caption_preview(self, prefix: str, text: str) -> None:
         base = self._captions.splitlines()[-11:]
         preview = (text or "").replace("\n", " ").strip()
@@ -205,27 +216,35 @@ class ConversationWorker(QObject):
         self._logger = RealtimeLogWriter(log_dir=log_dir, session_name=session_name)
         self._captions = ""
         self.captions_updated.emit(self._captions)
+        self._reconnect_attempts = 0
+        self._next_reconnect_at = 0.0
+        self._response_started_at = None
+        self._response_first_audio_at = None
+        self._speech_stopped_at = None
 
-        self._logger.append(
-            {
-                "type": "session_start",
-                "settings": {
-                    "openai_base_url": "wss://api.openai.com/v1/realtime",
-                    "realtime_model": self.settings.realtime_model,
-                    "language": self.settings.language,
-                    "tts_voice": self.settings.tts_voice,
-                    "audio": {
-                        "input_device": self.settings.input_device,
-                        "output_device": self.settings.output_device,
-                    },
+        self._log_event(
+            "session_start",
+            settings={
+                "openai_base_url": "wss://api.openai.com/v1/realtime",
+                "realtime_model": self.settings.realtime_model,
+                "language": self.settings.language,
+                "tts_voice": self.settings.tts_voice,
+                "tts_speed": self.settings.tts_speed,
+                "log_conversations": bool(self.settings.log_conversations),
+                "audio": {
+                    "input_device": self.settings.input_device,
+                    "output_device": self.settings.output_device,
                 },
-            }
+            },
+        )
+        self._append_caption(
+            f"Relace: model={self.settings.realtime_model}, hlas={self.settings.tts_voice}, log obsahu={'ano' if self.settings.log_conversations else 'ne'}"
         )
 
     def _end_session(self) -> None:
         if not self._logger:
             return
-        self._logger.append({"type": "session_end"})
+        self._log_event("session_end", dropped_records=self._logger.dropped_records, last_error=self._logger.last_error)
         try:
             self._logger.close()
         except Exception:
@@ -235,14 +254,14 @@ class ConversationWorker(QObject):
     def _ensure_realtime(self, turn_mode: str) -> RealtimeService:
         if not self.settings.openai_api_key:
             raise ValueError("Chybí API key")
+        self._rt_turn_mode = turn_mode
 
         # Language used for instructions + transcription hint.
-        resolved = self.settings.language if self.settings.language in _ALLOWED_LANGS else "cs"
-        if resolved == "auto":
-            resolved = "cs"
-        self._resolved_lang = resolved
+        resolved = self.settings.language if self.settings.language in _ALLOWED_LANGS else "auto"
+        self._resolved_lang = "cs" if resolved == "auto" else resolved
 
-        instructions = build_system_prompt(self.settings, resolved)
+        instructions = build_system_prompt(self.settings, self._resolved_lang)
+        voice, fallback_reason = _resolve_tts_voice(self._resolved_lang, self.settings.tts_voice)
 
         # Keep within current Realtime constraints (speed max is 1.5).
         try:
@@ -255,8 +274,8 @@ class ConversationWorker(QObject):
             api_key=self.settings.openai_api_key,
             model=self.settings.realtime_model,
             instructions=instructions,
-            voice=self.settings.tts_voice,
-            language_hint=resolved if self.settings.language != "auto" else "auto",
+            voice=voice,
+            language_hint=resolved,
             turn_mode=turn_mode,
             auto_interrupt=True,
             noise_reduction="far_field",
@@ -266,11 +285,16 @@ class ConversationWorker(QObject):
             server_vad_threshold=0.60,
         )
 
+        if fallback_reason:
+            self._append_caption(f"Hlas: {fallback_reason}")
+
         if self._rt is None or not self._rt.is_connected:
             # Znovu vytvorit websocket po odpojeni.
             self._rt = RealtimeService(cfg)
             self._wire_realtime_callbacks(self._rt)
             self._rt.connect()
+            self._reconnect_attempts = 0
+            self._next_reconnect_at = 0.0
             return self._rt
 
         # Same websocket; update session settings.
@@ -282,7 +306,7 @@ class ConversationWorker(QObject):
         self._rt.cfg.server_vad_threshold = 0.60
         self._rt.update_session(
             instructions=instructions,
-            voice=self.settings.tts_voice,
+            voice=voice,
             language_hint=cfg.language_hint,
             turn_mode=turn_mode,
         )
@@ -291,9 +315,16 @@ class ConversationWorker(QObject):
     def _wire_realtime_callbacks(self, rt: RealtimeService) -> None:
         rt.on_status = lambda s: self._append_caption(s)
 
+        def _is_recoverable_realtime_error(msg: str) -> bool:
+            text = (msg or "").lower()
+            markers = ("timed out", "timeout", "connection", "socket", "reset", "closed", "disconnect", "broken pipe")
+            return any(marker in text for marker in markers)
+
         def _err(msg: str) -> None:
-            if self._logger:
-                self._logger.append({"type": "error", "message": msg})
+            self._log_event("error", message=msg)
+            if self._mode != "idle" and _is_recoverable_realtime_error(msg):
+                self._schedule_reconnect(msg)
+                return
             self._stop_realtime_session()
             self._set_state("error")
             self.error.emit(msg)
@@ -302,13 +333,13 @@ class ConversationWorker(QObject):
 
         def _user(t: str) -> None:
             self._append_caption(f"Ty: {t}")
-            if self._logger:
-                self._logger.append({"type": "user", "text": t})
+            self._log_conversation_text("user", t)
 
             # Transition from "transcribing" to "thinking" once we have a transcript.
             self._awaiting_transcript = False
             if self._ui_state not in {"speaking", "error"}:
                 self._set_state("thinking")
+            self._response_started_at = time.monotonic()
 
         rt.on_user_transcript = _user
 
@@ -316,21 +347,29 @@ class ConversationWorker(QObject):
 
         def _ai_done(t: str) -> None:
             self._append_caption(f"AI: {t}")
-            if self._logger:
-                self._logger.append({"type": "assistant", "text": t})
+            self._log_conversation_text("assistant", t)
 
         rt.on_assistant_text_done = _ai_done
 
         def _audio(pcm: bytes) -> None:
             # Audio deltas arrive faster than realtime; enqueue and let the player drain.
             self._set_state("speaking")
+            if self._response_first_audio_at is None:
+                self._response_first_audio_at = time.monotonic()
+                latency_ms = None
+                if self._response_started_at is not None:
+                    latency_ms = int((self._response_first_audio_at - self._response_started_at) * 1000)
+                self._log_event("assistant_audio_first_delta", latency_ms=latency_ms, bytes=len(pcm))
             try:
                 self._ensure_player()
                 if self._player:
                     self._player.enqueue_pcm16(pcm)
             except Exception as e:
                 # If playback fails (wrong output device), surface a helpful error.
-                _err(str(e) + "\n\n" + format_device_help())
+                self._log_event("error", message=str(e))
+                self._stop_realtime_session()
+                self._set_state("error")
+                self.error.emit(str(e) + "\n\n" + format_device_help())
 
         rt.on_assistant_audio_delta = _audio
 
@@ -343,6 +382,10 @@ class ConversationWorker(QObject):
                 pass
             self._awaiting_transcript = False
             self._set_state("listening")
+            self._response_started_at = None
+            self._response_first_audio_at = None
+            self._speech_stopped_at = None
+            self._log_event("speech_started")
 
         rt.on_vad_speech_started = _speech_started
 
@@ -351,18 +394,65 @@ class ConversationWorker(QObject):
             self._awaiting_transcript = True
             # In handsfree, the server will auto-create the response (create_response=True).
             self._set_state("transcribing")
+            self._speech_stopped_at = time.monotonic()
+            self._log_event("speech_stopped")
 
         rt.on_vad_speech_stopped = _speech_stopped
 
         def _resp_done() -> None:
             # In handsfree mode we keep listening; in PTT return to idle.
+            total_latency_ms = None
+            if self._speech_stopped_at is not None:
+                total_latency_ms = int((time.monotonic() - self._speech_stopped_at) * 1000)
+            self._log_event("response_done", total_latency_ms=total_latency_ms)
             if self._mode == "handsfree":
                 self._set_state("listening")
             else:
                 self._set_state("idle")
             self._awaiting_transcript = False
+            self._response_started_at = None
+            self._response_first_audio_at = None
+            self._speech_stopped_at = None
 
         rt.on_response_done = _resp_done
+
+    def _schedule_reconnect(self, reason: str) -> None:
+        self._reconnect_attempts += 1
+        delay = min(8.0, 0.8 * (2 ** max(0, self._reconnect_attempts - 1)))
+        self._next_reconnect_at = time.monotonic() + delay
+        self._append_caption(f"Realtime: plánuju reconnect za {delay:.1f} s")
+        self._log_event("reconnect_scheduled", reason=reason, attempt=self._reconnect_attempts, delay_s=delay)
+        try:
+            if self._rt:
+                self._rt.close()
+        except Exception:
+            pass
+        self._rt = None
+        self._set_state("transcribing" if self._awaiting_transcript else "thinking")
+
+    def _attempt_reconnect_if_needed(self) -> None:
+        if self._mode == "idle":
+            return
+        if self._rt is not None and self._rt.is_connected:
+            return
+        if self._next_reconnect_at and time.monotonic() < self._next_reconnect_at:
+            return
+        try:
+            self._append_caption("Realtime: obnovuji spojení…")
+            self._ensure_realtime(self._rt_turn_mode)
+            self._log_event("reconnect_ok", attempt=self._reconnect_attempts)
+            if self._mode == "handsfree" and self._mic and not self._mic_enabled.is_set():
+                self._mic_enabled.set()
+            if self._mode == "handsfree":
+                self._set_state("listening")
+        except Exception as exc:
+            self._log_event("reconnect_failed", message=str(exc), attempt=self._reconnect_attempts)
+            if self._reconnect_attempts >= 5:
+                self._stop_realtime_session()
+                self._set_state("error")
+                self.error.emit(f"Realtime se nepodařilo obnovit: {exc}")
+                return
+            self._schedule_reconnect(str(exc))
 
     def _start_rt_loop(self) -> None:
         if self._rt_loop_thread and self._rt_loop_thread.is_alive():
@@ -371,6 +461,7 @@ class ConversationWorker(QObject):
 
         def loop() -> None:
             while not self._rt_loop_stop.is_set():
+                self._attempt_reconnect_if_needed()
                 if self._rt:
                     self._rt.pump_events()
 
@@ -439,6 +530,8 @@ class ConversationWorker(QObject):
         self._stop_rt_loop()
         self._mode = "idle"
         self._awaiting_transcript = False
+        self._reconnect_attempts = 0
+        self._next_reconnect_at = 0.0
         self._end_session()
 
     @Slot()
@@ -464,6 +557,8 @@ class ConversationWorker(QObject):
             pass
         self._rt = None
         self._stop_rt_loop()
+        self._reconnect_attempts = 0
+        self._next_reconnect_at = 0.0
         self.input_level.emit(0.0)
         self.output_level.emit(0.0)
         self._set_state("idle")
@@ -580,7 +675,6 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._wire()
-        self.showMaximized()
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -705,11 +799,14 @@ class MainWindow(QMainWindow):
         if not self.settings.openai_api_key:
             return []
         svc = OpenAIService(self.settings.openai_api_key)
-        models = svc.list_models()
-        realtime = [m for m in models if "realtime" in m.lower()]
-        if realtime:
-            return sorted(set(realtime))
-        return OpenAIService.filter_chat_models(models)
+        try:
+            models = svc.list_models()
+            realtime = [m for m in models if "realtime" in m.lower()]
+            if realtime:
+                return sorted(set(realtime))
+            return OpenAIService.filter_chat_models(models)
+        finally:
+            svc.close()
 
     def _open_settings_dialog(self) -> None:
         try:
@@ -829,7 +926,7 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setStyleSheet(app_stylesheet())
     w = MainWindow(settings)
-    w.show()
+    w.showMaximized()
     sys.exit(app.exec())
 
 

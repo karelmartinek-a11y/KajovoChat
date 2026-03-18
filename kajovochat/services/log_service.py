@@ -11,16 +11,18 @@ from typing import Any, Dict
 class RealtimeLogWriter:
     """Deterministic JSONL logger + human-readable TXT sidecar."""
 
-    def __init__(self, log_dir: Path, session_name: str) -> None:
+    def __init__(self, log_dir: Path, session_name: str, *, queue_size: int = 2048) -> None:
         self.log_dir = log_dir
         self.session_name = session_name
 
-        self._q: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+        self._q: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=max(32, int(queue_size)))
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
         self._seq_lock = threading.Lock()
         self._seq = 0
+        self.last_error: str = ""
+        self.dropped_records = 0
 
         self.txt_path = self.log_dir / f"{session_name}.txt"
         self.jsonl_path = self.log_dir / f"{session_name}.jsonl"
@@ -46,7 +48,8 @@ class RealtimeLogWriter:
         try:
             self._q.put_nowait(record)
         except queue.Full:
-            pass
+            self.dropped_records += 1
+            self.last_error = "fronta logů je plná"
 
     def close(self) -> None:
         self._stop.set()
@@ -68,10 +71,12 @@ class RealtimeLogWriter:
 
     def _run(self) -> None:
         last_flush = time.time()
-        while not self._stop.is_set():
+        while True:
             try:
                 item = self._q.get(timeout=0.25)
             except queue.Empty:
+                if self._stop.is_set():
+                    break
                 item = None
 
             if item:
@@ -98,18 +103,18 @@ class RealtimeLogWriter:
                 try:
                     if line:
                         self._txt_f.write(str(line).rstrip() + "\n")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self.last_error = str(exc)
 
                 try:
                     self._jsonl_f.write(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self.last_error = str(exc)
 
             if time.time() - last_flush > 0.35:
                 try:
                     self._txt_f.flush()
                     self._jsonl_f.flush()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self.last_error = str(exc)
                 last_flush = time.time()

@@ -1,3 +1,0 @@
-﻿2026-02-27 22:15:32 initial attempt: git push origin --delete master (failed: default branch protected)
-2026-02-27 22:15:32 switch default branch: gh repo edit --default-branch main (ok)
-2026-02-27 22:15:32 delete after switch: git push origin --delete master (success)

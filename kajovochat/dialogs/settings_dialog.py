@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
+    QCheckBox,
     QComboBox,
     QPushButton,
     QFileDialog,
@@ -83,13 +84,6 @@ class SettingsDialog(QDialog):
             self._lang.addItem(lbl, userData=code)
         self._set_lang_current(settings.language)
 
-        # Model (chat)
-        self._model = QComboBox()
-        self._model.setEditable(True)
-        if settings.chat_model:
-            self._model.addItem(settings.chat_model)
-        self._model.setCurrentText(settings.chat_model or "")
-
         self._refresh_models_btn = QPushButton("Načíst modely")
         self._refresh_models_btn.clicked.connect(lambda _=False: self._refresh_models_async())
 
@@ -117,7 +111,7 @@ class SettingsDialog(QDialog):
             self._tts_voice.setCurrentText(TTS_VOICES[0])
 
         self._tts_speed = QLineEdit(f"{settings.tts_speed:.2f}")
-        self._tts_speed.setValidator(QDoubleValidator(0.25, 4.0, 2, self))
+        self._tts_speed.setValidator(QDoubleValidator(0.25, 1.5, 2, self))
 
         self._tts_preview_btn = QPushButton("Ukázka")
         self._tts_preview_btn.clicked.connect(lambda _=False: self._toggle_tts_preview())
@@ -149,6 +143,8 @@ class SettingsDialog(QDialog):
         # Logs directory
         self._log_dir = QLineEdit(settings.log_dir)
         self._log_dir.setReadOnly(True)
+        self._log_conversations = QCheckBox("Ukládat obsah konverzace do logů")
+        self._log_conversations.setChecked(bool(settings.log_conversations))
         pick = QPushButton("Vybrat…")
         pick.clicked.connect(lambda _=False: self._pick_dir())
 
@@ -157,11 +153,10 @@ class SettingsDialog(QDialog):
         form.addRow("Jazyk konverzace:", self._lang)
 
         form.addRow(self._sep("Modely"))
-        model_row = QHBoxLayout()
-        model_row.addWidget(self._model, 1)
-        model_row.addWidget(self._refresh_models_btn)
-        form.addRow("Chat model:", model_row)
-        form.addRow("Realtime (hlas):", self._realtime_model)
+        realtime_row = QHBoxLayout()
+        realtime_row.addWidget(self._realtime_model, 1)
+        realtime_row.addWidget(self._refresh_models_btn)
+        form.addRow("Realtime (hlas):", realtime_row)
 
         form.addRow(self._sep("Odpovědi"))
         form.addRow("Temperature (0–1):", self._temperature)
@@ -172,7 +167,7 @@ class SettingsDialog(QDialog):
         voice_row.addWidget(self._tts_voice, 1)
         voice_row.addWidget(self._tts_preview_btn)
         form.addRow("Hlas:", voice_row)
-        form.addRow("Rychlost (0.25–4.0):", self._tts_speed)
+        form.addRow("Rychlost (0.25–1.5):", self._tts_speed)
 
         form.addRow(self._sep("Audio"))
         in_row = QHBoxLayout()
@@ -193,6 +188,7 @@ class SettingsDialog(QDialog):
         dir_row.addWidget(self._log_dir, 1)
         dir_row.addWidget(pick)
         form.addRow("Adresář logů:", dir_row)
+        form.addRow("", self._log_conversations)
 
         box = QGroupBox("Nastavení")
         box.setLayout(form)
@@ -260,7 +256,7 @@ class SettingsDialog(QDialog):
                 speed = float(self._tts_speed.text().replace(",", "."))
             except Exception:
                 speed = float(self.settings.tts_speed)
-            speed = max(0.25, min(4.0, float(speed)))
+            speed = max(0.25, min(1.5, float(speed)))
 
             output_dev = self._output_dev.currentData()
             out_arg = str(int(output_dev)) if output_dev is not None else "-1"
@@ -388,15 +384,15 @@ class SettingsDialog(QDialog):
 
     def _on_models_loaded(self, models: list) -> None:
         try:
-            cur = self._model.currentText().strip() or self.settings.chat_model
-            self._model.clear()
-            if cur:
-                self._model.addItem(cur)
+            cur = self._realtime_model.currentText().strip() or self.settings.realtime_model
+            self._realtime_model.clear()
+            for known in REALTIME_MODELS:
+                self._realtime_model.addItem(known)
             for m in models:
                 if m and m != cur:
-                    self._model.addItem(str(m))
+                    self._realtime_model.addItem(str(m))
             if cur:
-                self._model.setCurrentText(cur)
+                self._realtime_model.setCurrentText(cur)
         except Exception:
             self._log.exception("models_loaded_failed")
 
@@ -422,7 +418,6 @@ class SettingsDialog(QDialog):
         self.settings.max_output_tokens = max(64, min(4096, mt))
 
         # models
-        self.settings.chat_model = self._model.currentText().strip() or self.settings.chat_model
         self.settings.realtime_model = self._realtime_model.currentText().strip() or self.settings.realtime_model
 
         # TTS
@@ -435,7 +430,7 @@ class SettingsDialog(QDialog):
             sp = float(self._tts_speed.text().replace(",", "."))
         except Exception:
             sp = self.settings.tts_speed
-        self.settings.tts_speed = max(0.25, min(4.0, float(sp)))
+        self.settings.tts_speed = max(0.25, min(1.5, float(sp)))
 
         # audio devices
         self.settings.input_device = self._input_dev.currentData()
@@ -474,6 +469,7 @@ class SettingsDialog(QDialog):
 
         # log dir
         self.settings.log_dir = self._log_dir.text().strip() or self.settings.log_dir
+        self.settings.log_conversations = bool(self._log_conversations.isChecked())
         try:
             self.settings.ensure_log_dir()
         except Exception:
