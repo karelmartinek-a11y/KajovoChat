@@ -40,3 +40,10 @@ def test_head_widget_error_reset_rect_exists_after_paint() -> None:
     widget.repaint()
     app.processEvents()
     assert widget._reset_rect.width() > 0.0
+
+
+def test_head_widget_reports_render_backend() -> None:
+    _app()
+    widget = HeadWidget(str(ASSETS_DIR / "head_photo.png"))
+    summary = widget.render_backend_summary()
+    assert "backend" in summary or "fallback-2d" in summary or "gpu-opengl" in summary

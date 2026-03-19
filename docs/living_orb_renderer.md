@@ -9,6 +9,7 @@ pip install -r requirements.txt
 ```
 
 `living orb` používá `PySide6` a `moderngl`. V test/offscreen prostředí přepne widget na bezpečný 2D fallback, ale produkční cesta je GPU přes `QOpenGLWidget`.
+Při startu se provede Qt offscreen probe OpenGL contextu. Když neprojde, aplikace nepoužije GPU widget a rovnou přepne na fallback backend s diagnostickou hláškou.
 
 ## Demo
 

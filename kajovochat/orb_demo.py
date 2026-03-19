@@ -43,6 +43,8 @@ class OrbDemoWindow(QMainWindow):
 
         self._status = QLabel("")
         layout.addWidget(self._status, 0, Qt.AlignHCenter)
+        self._backend = QLabel("")
+        layout.addWidget(self._backend, 0, Qt.AlignHCenter)
 
         self.setCentralWidget(root)
 
@@ -52,6 +54,7 @@ class OrbDemoWindow(QMainWindow):
         self._timer.timeout.connect(self._tick)
         self._timer.start()
         self._apply_state("idle")
+        self._backend.setText(self._orb.diagnostics.summary())
 
     def _apply_state(self, state: str) -> None:
         self._orb.set_state(state)

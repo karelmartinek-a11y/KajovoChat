@@ -5,7 +5,7 @@ from typing import Optional
 from PySide6.QtCore import QRectF, Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from ..orb.widget import LivingOrbWidget
+from ..orb.widget import create_orb_widget
 
 
 class HeadWidget(QWidget):
@@ -16,7 +16,7 @@ class HeadWidget(QWidget):
 
     def __init__(self, image_path: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._orb = LivingOrbWidget(self)
+        self._orb = create_orb_widget(self)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._orb)
@@ -77,3 +77,13 @@ class HeadWidget(QWidget):
         except Exception:
             pass
         super().closeEvent(event)
+
+    def render_backend_summary(self) -> str:
+        diagnostics = getattr(self._orb, "diagnostics", None)
+        if diagnostics is None:
+            return "backend=unknown"
+        return diagnostics.summary()
+
+    def is_gpu_renderer_active(self) -> bool:
+        diagnostics = getattr(self._orb, "diagnostics", None)
+        return bool(diagnostics and diagnostics.available)

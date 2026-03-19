@@ -909,6 +909,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._wire()
+        QTimer.singleShot(0, self._report_render_backend)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -1027,6 +1028,19 @@ class MainWindow(QMainWindow):
         self.worker.input_level.connect(self._on_input_level)
         self.worker.output_level.connect(self._on_output_level)
         self.worker.output_pose.connect(self._on_output_pose)
+
+    def _report_render_backend(self) -> None:
+        try:
+            summary = self.head.render_backend_summary()
+        except Exception:
+            return
+        prefix = "Renderer: GPU" if self.head.is_gpu_renderer_active() else "Renderer: fallback"
+        text = f"{prefix} | {summary}"
+        existing = self.captions.text().strip()
+        if existing:
+            self.captions.setText(existing + "\n" + text)
+        else:
+            self.captions.setText(text)
 
     def _open_openai_dialog(self) -> None:
         d = OpenAIDialog(self.settings, self)
