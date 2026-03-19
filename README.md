@@ -4,32 +4,18 @@ Desktop aplikace v `PySide6` pro hlasovou konverzaci přes OpenAI Realtime API.
 
 ## Co aplikace umí
 
-- hands-free hlasovou konverzaci přes klik na hlavu asistenta
+- hands-free hlasovou konverzaci přes klik na orb asistenta
 - push-to-talk přes tlačítko zeměkoule
-- cinematic planetární avatar widget s audio-reaktivní animací podle skutečně přehrávaného audia
+- shader-based living orb renderer s audio-reaktivní animací podle skutečně přehrávaného audia
 - barge-in během mluvení asistenta
 - softwarové tlumení self-hearing na notebookových reproduktorech
-
-## Produktové nastavení
-
-V běžném dialogu `Nastavení` zůstávají jen tyto volby:
-
-- režim jazyka odpovědi
-  - odpovídat jazykem uživatele
-  - vždy odpovídat zvoleným jazykem
-- pevný jazyk odpovědi
-- styl odpovědi
-  - stručný
-  - vědecký s analýzou
-  - normální
-
-Model, hlas, VAD, rychlost výstupu a výběr audio zařízení jsou řízené interně.
 
 ## Požadavky
 
 - Python `3.11+`
 - funkční mikrofon a reproduktory nebo sluchátka
 - platný OpenAI API klíč
+- GPU/driver s podporou OpenGL pro plnou living orb cestu
 
 ## Instalace
 
@@ -41,7 +27,7 @@ pip install -r requirements.txt
 
 ## Spuštění
 
-Preferovaný vstupní bod:
+Hlavní aplikace:
 
 ```bash
 python -m kajovochat
@@ -53,23 +39,19 @@ Alternativní vstupní bod:
 python app_gui.py
 ```
 
+Living orb demo:
+
+```bash
+python -m kajovochat.orb_demo
+```
+
 ## OpenAI klíč
 
 Po spuštění otevřete dialog `OpenAI` a vložte API klíč. Klíč se ve Windows ukládá přes DPAPI, na ostatních platformách přes systémový keyring, pokud je dostupný.
 
 ## Konfigurace
 
-Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. Ve Windows typicky:
-
-```text
-C:\Users\<uživatel>\AppData\Local\Kajovo\ChatbotKaja\settings.json
-```
-
-Technické logy se ukládají do:
-
-```text
-C:\Users\<uživatel>\Documents\ChatbotKajaLogs
-```
+Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. Technická dokumentace living orbu je v [docs/living_orb_renderer.md](docs/living_orb_renderer.md).
 
 ## Struktura projektu
 
@@ -77,8 +59,8 @@ C:\Users\<uživatel>\Documents\ChatbotKajaLogs
 - `kajovochat/main.py` GUI a orchestrace hlasové relace
 - `kajovochat/settings.py` minimální produktové nastavení a systémový prompt
 - `kajovochat/services/` audio, realtime websocket, OpenAI služby a logování
-- `kajovochat/dialogs/` dialog OpenAI a minimální dialog nastavení
-- `kajovochat/widgets/` vlastní UI widgety včetně planetárního avatar widgetu
+- `kajovochat/widgets/` vlastní UI widgety
+- `kajovochat/orb/` GPU living orb engine, audio analýza, stavový blending a shader renderer
 - `kajovochat/resources/assets/` obrázkové assety
 - `tests/` testy
 
@@ -88,8 +70,3 @@ C:\Users\<uživatel>\Documents\ChatbotKajaLogs
 python -m compileall -q kajovochat app_gui.py
 pytest -q
 ```
-
-## Omezení
-
-- self-hearing guard je čistě softwarový a bez systémového AEC nelze slíbit absolutní paritu s nativním ChatGPT Voice klientem
-- barge-in a anti-echo jsou laděné pro notebookový hands-free provoz, takže při velmi silném odposlechu z reproduktorů může být potřeba provozní test na konkrétním zařízení
