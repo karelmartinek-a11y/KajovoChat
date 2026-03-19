@@ -132,11 +132,20 @@ class TalkingHeadWidget(QWidget):
         else:
             self._output_level = self._smooth_exp(self._output_level, 0.0, dt, 0.04, 0.24)
 
-        source_viseme = self._external_performance.viseme if self._external_performance is not None else self._latest_viseme
+        source_state = self._state
+        source_input_level = self._input_level
+        source_output_level = self._output_level
+        source_viseme = self._latest_viseme
+        if self._external_performance is not None:
+            source_state = (self._external_performance.state or self._state).strip().lower()
+            source_input_level = self._external_performance.input_level
+            source_output_level = self._external_performance.output_level
+            source_viseme = self._external_performance.viseme
+
         self._current_frame = self._driver.drive(
-            state=self._state,
-            input_level=self._input_level,
-            output_level=self._output_level,
+            state=source_state,
+            input_level=source_input_level,
+            output_level=source_output_level,
             lipsync_frame=source_viseme,
             now=now,
         )

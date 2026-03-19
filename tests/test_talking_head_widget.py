@@ -1,31 +1,19 @@
 from __future__ import annotations
 
-import os
-import sys
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 from PySide6.QtWidgets import QApplication
 
 from kajovochat.animation.types import BlinkFrame, GazeFrame, HeadMotionFrame, PerformanceFrame, VisemeFrame
 from kajovochat.widgets.talking_head_widget import TalkingHeadWidget
 
 
-def _app() -> QApplication:
-    app = QApplication.instance()
-    return app if app is not None else QApplication(sys.argv)
-
-
-def test_talking_head_widget_can_be_created_without_production_assets() -> None:
-    _app()
+def test_talking_head_widget_can_be_created_without_production_assets(qapp: QApplication) -> None:
     widget = TalkingHeadWidget()
     widget.resize(640, 640)
     assert widget.rig_definition.fallback_mode is True
     assert widget.rig_definition.production_ready is False
 
 
-def test_talking_head_widget_accepts_legacy_snapshot_dict() -> None:
-    _app()
+def test_talking_head_widget_accepts_legacy_snapshot_dict(qapp: QApplication) -> None:
     widget = TalkingHeadWidget()
     widget.set_lipsync_snapshot(
         {
@@ -39,8 +27,7 @@ def test_talking_head_widget_accepts_legacy_snapshot_dict() -> None:
     assert widget._current_frame.viseme.pose == "oo"
 
 
-def test_talking_head_widget_accepts_performance_frame() -> None:
-    _app()
+def test_talking_head_widget_accepts_performance_frame(qapp: QApplication) -> None:
     widget = TalkingHeadWidget()
     frame = PerformanceFrame(
         state="speaking",
@@ -54,11 +41,31 @@ def test_talking_head_widget_accepts_performance_frame() -> None:
     )
     widget.set_performance_frame(frame)
     widget._tick()
-    assert widget._current_frame.state == "idle" or widget._current_frame.viseme.pose == "aa"
+    assert widget._current_frame.state == "speaking"
+    assert widget._current_frame.output_level > 0.0
+    assert widget._current_frame.viseme.pose == "aa"
 
 
-def test_talking_head_widget_error_state_with_empty_text_does_not_raise() -> None:
-    _app()
+def test_talking_head_widget_accepts_performance_frame_dict(qapp: QApplication) -> None:
+    widget = TalkingHeadWidget()
+    frame = PerformanceFrame(
+        state="thinking",
+        input_level=0.2,
+        output_level=0.0,
+        speech_energy=0.2,
+        viseme=VisemeFrame(cluster="ih", pose="small", openness=0.18, energy=0.2, speech_energy=0.2, jaw_open=0.12, mouth_open=0.16),
+        blink=BlinkFrame(),
+        gaze=GazeFrame(),
+        head_motion=HeadMotionFrame(),
+    )
+    widget.set_performance_frame(frame.to_dict())
+    widget._tick()
+    assert widget._current_frame.state == "thinking"
+    assert widget._current_frame.input_level >= 0.19
+    assert widget._current_frame.viseme.cluster == "ih"
+
+
+def test_talking_head_widget_error_state_with_empty_text_does_not_raise(qapp: QApplication) -> None:
     widget = TalkingHeadWidget()
     widget.resize(640, 640)
     widget.set_state("error")

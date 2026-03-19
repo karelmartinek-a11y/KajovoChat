@@ -6,8 +6,7 @@ Desktop aplikace v `PySide6` pro hlasovou konverzaci přes OpenAI Realtime API.
 
 - hands-free hlasovou konverzaci přes klik na hlavu asistenta
 - push-to-talk přes tlačítko zeměkoule
-- photo-based talking head widget s lipsyncem podle skutečně přehrávaného audia
-- nový `TalkingHeadWidget` s runtime fallbackem na bezpečný photo rig
+- cinematic planetární avatar widget s audio-reaktivní animací podle skutečně přehrávaného audia
 - barge-in během mluvení asistenta
 - softwarové tlumení self-hearing na notebookových reproduktorech
 
@@ -79,26 +78,9 @@ C:\Users\<uživatel>\Documents\ChatbotKajaLogs
 - `kajovochat/settings.py` minimální produktové nastavení a systémový prompt
 - `kajovochat/services/` audio, realtime websocket, OpenAI služby a logování
 - `kajovochat/dialogs/` dialog OpenAI a minimální dialog nastavení
-- `kajovochat/widgets/` vlastní UI widgety včetně photo-based talking head
-- `docs/talking_head_architecture.md` architektura animation/render/widget vrstvy
-- `docs/talking_head_tuning.md` ladění manifestu a motion kanálů
-- `docs/talking_head_asset_spec.md` technická specifikace production layered rigu
+- `kajovochat/widgets/` vlastní UI widgety včetně planetárního avatar widgetu
 - `kajovochat/resources/assets/` obrázkové assety
 - `tests/` testy
-
-## Talking Head Runtime
-
-Aplikace nově preferuje `TalkingHeadWidget`, ale zůstává bezpečná i bez production layered rigu.
-
-- pokud production rig assety chybí, widget se automaticky přepne do fallback rigu nad `head_photo.png`
-- pokud selže manifest nebo inicializace nového widgetu, hlavní okno se vrátí na původní `HeadWidget`
-- fallback je profesionálně doladěný v rámci existující fotografie, ale nepředstírá plnohodnotnou filmovou layered kvalitu
-- pro rychlý návrat na starý widget během stabilizace lze použít:
-
-```powershell
-$env:KAJOVOCHAT_HEAD_WIDGET = "legacy"
-python -m kajovochat
-```
 
 ## Test a kontrola
 

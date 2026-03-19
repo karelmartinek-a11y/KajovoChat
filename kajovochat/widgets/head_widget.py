@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import math
 import time
+from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QMarginsF, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QRadialGradient
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from ..theme import Theme
-from .sphere_renderer import qimage_to_rgba_numpy, rgba_numpy_to_qimage
+from .sphere_renderer import SphereRenderer
 
 
 def _blend_color(a: QColor, b: QColor, t: float) -> QColor:
@@ -23,6 +24,14 @@ def _blend_color(a: QColor, b: QColor, t: float) -> QColor:
 
 
 class HeadWidget(QWidget):
+    """Cinematic planetary avatar widget.
+
+    Původní photo-head widget byl nahrazen hotovou planetární animací postavenou
+    nad existujícími assety Země, oblačnosti a Měsíce. Widget zachovává stejné
+    veřejné API jako původní head widget, takže zbytek aplikace nemusí řešit,
+    jestli se zrovna zobrazuje obličej nebo stylizovaný avatar.
+    """
+
     orb_clicked = Signal()
     reset_clicked = Signal()
 
@@ -32,9 +41,20 @@ class HeadWidget(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
         self._theme = Theme()
-        self._source = self._load_head_image(image_path)
-        self._head_bbox = self._compute_alpha_bbox(self._source)
-        self._mouth_rect = self._derive_mouth_rect(self._head_bbox)
+        assets_dir = Path(image_path).resolve().parent
+        earth_img = QImage(str(assets_dir / "earth_hd.png"))
+        clouds_img = QImage(str(assets_dir / "earth_clouds_hd.png"))
+        moon_img = QImage(str(assets_dir / "moon_hd.png"))
+        self._planet_renderer = SphereRenderer(earth_img, clouds_img)
+        self._moon_renderer = SphereRenderer(moon_img)
+
+        self._planet_img: Optional[QImage] = None
+        self._moon_img: Optional[QImage] = None
+        self._last_planet_size = 0
+        self._last_planet_angle_q = -10**9
+        self._last_cloud_angle_q = -10**9
+        self._last_moon_size = 0
+        self._last_moon_angle_q = -10**9
 
         self._state = "idle"
         self._running = False
@@ -46,62 +66,19 @@ class HeadWidget(QWidget):
         self._out_level_target = 0.0
         self._in_level = 0.0
         self._out_level = 0.0
-        self._target_weights = {"closed": 1.0, "small": 0.0, "aa": 0.0, "ee": 0.0, "oo": 0.0}
-        self._weights = dict(self._target_weights)
-        self._mouth_openness = 0.0
+        self._pose_weights = {"closed": 1.0, "small": 0.0, "aa": 0.0, "ee": 0.0, "oo": 0.0}
+        self._mouth_energy = 0.0
+        self._aurora_bias = 0.0
         self._t0 = time.perf_counter()
         self._anim_t = 0.0
+        self._planet_angle = 0.0
+        self._cloud_angle = 0.0
+        self._moon_angle = 0.0
 
         self._timer = QTimer(self)
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
-
-    def _load_head_image(self, image_path: str) -> QImage:
-        raw = QImage(image_path)
-        if raw.isNull():
-            return QImage()
-        rgba = qimage_to_rgba_numpy(raw)
-        if rgba.size == 0:
-            return raw
-
-        rgb = rgba[..., :3].astype("int16")
-        samples = [rgb[0, 0], rgb[0, -1], rgb[-1, 0], rgb[-1, -1], rgb[min(10, rgb.shape[0] - 1), min(10, rgb.shape[1] - 1)]]
-        bg = sum(samples) / float(len(samples))
-        distance = ((rgb - bg) ** 2).sum(axis=2) ** 0.5
-        bright = rgb.mean(axis=2)
-        alpha = rgba[..., 3].astype("uint8")
-        mask = (distance < 22.0) | ((distance < 34.0) & (bright > 220.0))
-        alpha[mask] = 0
-        edge = 12
-        alpha[:edge, :] = 0
-        alpha[-edge:, :] = 0
-        alpha[:, :edge] = 0
-        alpha[:, -edge:] = 0
-        rgba[..., 3] = alpha
-        return rgba_numpy_to_qimage(rgba.astype("uint8"))
-
-    @staticmethod
-    def _compute_alpha_bbox(image: QImage) -> QRectF:
-        if image.isNull():
-            return QRectF(0, 0, 1, 1)
-        rgba = qimage_to_rgba_numpy(image)
-        if rgba.size == 0:
-            return QRectF(0, 0, image.width(), image.height())
-        alpha = rgba[..., 3]
-        ys, xs = (alpha > 8).nonzero()
-        if xs.size == 0 or ys.size == 0:
-            return QRectF(0, 0, image.width(), image.height())
-        return QRectF(float(xs.min()), float(ys.min()), float(xs.max() - xs.min() + 1), float(ys.max() - ys.min() + 1))
-
-    @staticmethod
-    def _derive_mouth_rect(bbox: QRectF) -> QRectF:
-        return QRectF(
-            bbox.left() + bbox.width() * 0.435,
-            bbox.top() + bbox.height() * 0.472,
-            bbox.width() * 0.17,
-            bbox.height() * 0.026,
-        )
 
     @staticmethod
     def _smooth_exp(current: float, target: float, dt: float, tau_up: float, tau_down: float) -> float:
@@ -134,8 +111,28 @@ class HeadWidget(QWidget):
         weights = snapshot.get("weights")
         if not isinstance(weights, dict):
             return
-        for pose in self._target_weights:
-            self._target_weights[pose] = max(0.0, min(1.0, float(weights.get(pose, 0.0))))
+        total = 0.0
+        for key in self._pose_weights:
+            value = max(0.0, min(1.0, float(weights.get(key, 0.0))))
+            self._pose_weights[key] = value
+            total += value
+        if total > 1e-6:
+            for key in self._pose_weights:
+                self._pose_weights[key] /= total
+        self._mouth_energy = max(
+            0.0,
+            min(
+                1.0,
+                self._pose_weights["small"] * 0.20
+                + self._pose_weights["aa"] * 1.00
+                + self._pose_weights["ee"] * 0.48
+                + self._pose_weights["oo"] * 0.72,
+            ),
+        )
+        self._aurora_bias = max(
+            0.0,
+            min(1.0, self._pose_weights["ee"] * 0.35 + self._pose_weights["oo"] * 0.85 + self._pose_weights["aa"] * 0.20),
+        )
 
     def set_error_text(self, msg: str) -> None:
         self._error_text = (msg or "").strip()
@@ -157,224 +154,271 @@ class HeadWidget(QWidget):
         self._anim_t += dt
 
         if self._state == "listening":
-            self._in_level = self._smooth_exp(self._in_level, self._in_level_target, dt, 0.03, 0.15)
+            self._in_level = self._smooth_exp(self._in_level, self._in_level_target, dt, 0.03, 0.16)
         else:
-            self._in_level = self._smooth_exp(self._in_level, 0.0, dt, 0.04, 0.20)
+            self._in_level = self._smooth_exp(self._in_level, 0.0, dt, 0.05, 0.20)
 
         if self._state == "speaking":
-            self._out_level = self._smooth_exp(self._out_level, self._out_level_target, dt, 0.025, 0.17)
+            target = max(self._out_level_target, self._mouth_energy * 0.85)
+            self._out_level = self._smooth_exp(self._out_level, target, dt, 0.025, 0.18)
         else:
-            self._out_level = self._smooth_exp(self._out_level, 0.0, dt, 0.04, 0.24)
+            self._out_level = self._smooth_exp(self._out_level, 0.0, dt, 0.05, 0.26)
 
-        for pose, target in self._target_weights.items():
-            self._weights[pose] = self._smooth_exp(self._weights[pose], target, dt, 0.028, 0.12)
-        total = sum(max(0.0, value) for value in self._weights.values()) or 1.0
-        for pose in self._weights:
-            self._weights[pose] = max(0.0, self._weights[pose]) / total
-
-        self._mouth_openness = (
-            self._weights["small"] * 0.18
-            + self._weights["aa"] * 1.00
-            + self._weights["ee"] * 0.48
-            + self._weights["oo"] * 0.62
-        )
+        spin = 4.6 if self._running else 0.0
+        if self._state == "idle":
+            spin += 1.8
+        elif self._state == "connecting":
+            spin += 8.2
+        elif self._state == "listening":
+            spin += 5.5 + self._in_level * 2.8
+        elif self._state == "transcribing":
+            spin += 3.2
+        elif self._state == "thinking":
+            spin += 6.2
+        elif self._state == "speaking":
+            spin += 10.5 + self._out_level * 5.2
+        elif self._state == "reconnecting":
+            spin += 7.0
+        elif self._state == "error":
+            spin += 1.2
+        self._planet_angle = (self._planet_angle + spin * dt) % 360.0
+        self._cloud_angle = (self._cloud_angle + (spin * 1.18 + 2.4) * dt) % 360.0
+        self._moon_angle = (self._moon_angle + (14.0 + self._anim_t * 0.1) * dt) % 360.0
         self.update()
 
-    def _state_colors(self) -> tuple[QColor, QColor]:
-        accent = QColor(80, 182, 220, 160)
-        rim = QColor(230, 242, 250, 180)
+    def _state_colors(self) -> tuple[QColor, QColor, QColor]:
+        glow = QColor(70, 165, 255, 125)
+        rim = QColor(228, 247, 255, 170)
+        pulse = QColor(96, 195, 255, 190)
         if self._state in {"connecting", "reconnecting"}:
-            accent = QColor(249, 205, 92, 170)
-            rim = QColor(255, 228, 152, 180)
+            glow = QColor(255, 188, 94, 135)
+            rim = QColor(255, 232, 180, 180)
+            pulse = QColor(255, 214, 132, 210)
         elif self._state == "listening":
-            accent = QColor(75, 212, 178, 180)
-            rim = QColor(190, 255, 238, 190)
+            glow = QColor(70, 227, 176, 145)
+            rim = QColor(204, 255, 236, 190)
+            pulse = QColor(98, 255, 210, 215)
         elif self._state in {"thinking", "transcribing"}:
-            accent = QColor(104, 165, 255, 175)
-            rim = QColor(220, 234, 255, 180)
+            glow = QColor(136, 140, 255, 140)
+            rim = QColor(222, 226, 255, 180)
+            pulse = QColor(177, 185, 255, 215)
         elif self._state == "speaking":
-            accent = QColor(63, 176, 219, 200)
-            rim = QColor(227, 247, 255, 220)
+            glow = QColor(62, 206, 255, 160)
+            rim = QColor(224, 248, 255, 210)
+            pulse = QColor(103, 232, 255, 230)
         elif self._state == "error":
-            accent = QColor(255, 104, 104, 180)
-            rim = QColor(255, 203, 203, 210)
-        return accent, rim
+            glow = QColor(255, 94, 94, 145)
+            rim = QColor(255, 212, 212, 215)
+            pulse = QColor(255, 132, 132, 220)
+        return glow, rim, pulse
 
-    def _draw_state_overlays(self, p: QPainter, cx: float, cy: float, r: float, accent: QColor, rim: QColor) -> None:
+    def _ensure_planet(self, size: int) -> Optional[QImage]:
+        size = max(64, int(size))
+        angle_q = int(self._planet_angle * 2.0)
+        cloud_angle_q = int(self._cloud_angle * 2.0)
+        if (
+            self._planet_img is None
+            or self._last_planet_size != size
+            or self._last_planet_angle_q != angle_q
+            or self._last_cloud_angle_q != cloud_angle_q
+        ):
+            self._planet_img = self._planet_renderer.render_earth(size, angle_q / 2.0, cloud_angle_q / 2.0)
+            self._last_planet_size = size
+            self._last_planet_angle_q = angle_q
+            self._last_cloud_angle_q = cloud_angle_q
+        return self._planet_img
+
+    def _ensure_moon(self, size: int) -> Optional[QImage]:
+        size = max(28, int(size))
+        angle_q = int(self._moon_angle * 2.0)
+        if self._moon_img is None or self._last_moon_size != size or self._last_moon_angle_q != angle_q:
+            self._moon_img = self._moon_renderer.render_moon(size, angle_q / 2.0)
+            self._last_moon_size = size
+            self._last_moon_angle_q = angle_q
+        return self._moon_img
+
+    def _draw_background_glow(self, p: QPainter, cx: float, cy: float, radius: float, glow: QColor) -> None:
+        outer = QRadialGradient(QPointF(cx, cy), radius * 1.42)
+        outer.setColorAt(0.0, QColor(glow.red(), glow.green(), glow.blue(), int(glow.alpha() * 0.46)))
+        outer.setColorAt(0.44, QColor(glow.red(), glow.green(), glow.blue(), int(glow.alpha() * 0.20)))
+        outer.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(outer)
+        p.drawEllipse(QPointF(cx, cy), radius * 1.42, radius * 1.42)
+
+    def _draw_signal_rings(self, p: QPainter, cx: float, cy: float, radius: float, rim: QColor, pulse: QColor) -> None:
         t = self._anim_t
+        p.setBrush(Qt.NoBrush)
         if self._state in {"listening", "speaking"}:
-            level = self._in_level if self._state == "listening" else self._out_level
-            ring_r = r * (1.02 + 0.08 * level + 0.015 * math.sin(t * 2.0))
+            level = self._in_level if self._state == "listening" else max(self._out_level, self._mouth_energy)
+            base = radius * (1.04 + 0.06 * level)
+            for idx in range(2):
+                alpha = 0.55 - idx * 0.18
+                pen = QPen(_blend_color(rim, pulse, 0.35 + idx * 0.28))
+                pen.setWidthF(max(2.2, radius * (0.014 - idx * 0.002)))
+                pen.setDashPattern([radius * 0.11, radius * 0.07])
+                pen.setDashOffset((t * (36.0 + idx * 10.0)) % max(1.0, radius * 0.48))
+                color = pen.color()
+                color.setAlphaF(max(0.0, min(1.0, alpha)))
+                pen.setColor(color)
+                p.setPen(pen)
+                ring_r = base + radius * idx * 0.07 + math.sin(t * (2.0 + idx * 0.7)) * radius * 0.008
+                p.drawEllipse(QPointF(cx, cy), ring_r, ring_r)
+        elif self._state in {"thinking", "transcribing", "connecting", "reconnecting"}:
             pen = QPen(rim)
-            pen.setWidthF(max(2.4, r * 0.012))
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setDashPattern([r * 0.14, r * 0.08])
-            pen.setDashOffset((t * 42.0) % max(1.0, r * 0.5))
-            p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            p.drawEllipse(QPointF(cx, cy), ring_r, ring_r)
-        elif self._state in {"connecting", "reconnecting", "transcribing"}:
-            pen = QPen(rim)
-            pen.setWidthF(max(3.0, r * 0.014))
+            pen.setWidthF(max(3.0, radius * 0.016))
             pen.setCapStyle(Qt.RoundCap)
             p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            rect = QRectF(cx - r * 1.02, cy - r * 1.02, r * 2.04, r * 2.04)
-            start = int((-t * 170.0) * 16)
-            p.drawArc(rect, start, int(82 * 16))
-            p.drawArc(rect, start + int(175 * 16), int(58 * 16))
-        elif self._state == "thinking":
-            p.setPen(Qt.NoPen)
-            for idx in range(3):
-                phase = t * 1.8 + idx * 2.1
-                px = cx + math.cos(phase) * r * 0.98
-                py = cy + math.sin(phase) * r * 0.22 - r * 0.72
-                p.setBrush(_blend_color(accent, rim, 0.4 + 0.25 * idx))
-                p.drawEllipse(QPointF(px, py), r * 0.042, r * 0.042)
+            rect = QRectF(cx - radius * 1.08, cy - radius * 1.08, radius * 2.16, radius * 2.16)
+            start = int((-t * 160.0) * 16)
+            p.drawArc(rect, start, int(72 * 16))
+            p.drawArc(rect, start + int(162 * 16), int(54 * 16))
+            p.drawArc(rect, start + int(286 * 16), int(36 * 16))
         elif self._state == "error":
             pen = QPen(rim)
-            pen.setWidthF(max(3.2, r * 0.016))
+            pen.setWidthF(max(3.6, radius * 0.018))
             p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            p.drawEllipse(QPointF(cx, cy), r * 1.03, r * 1.03)
+            p.drawEllipse(QPointF(cx, cy), radius * 1.05, radius * 1.05)
 
-    def _draw_mouth_overlay(self, p: QPainter, target: QRectF) -> None:
-        src = self._mouth_rect
-        tx = target.left() + (src.left() / max(1.0, self._source.width())) * target.width()
-        ty = target.top() + (src.top() / max(1.0, self._source.height())) * target.height()
-        tw = (src.width() / max(1.0, self._source.width())) * target.width()
-        th = (src.height() / max(1.0, self._source.height())) * target.height()
-        mouth_rect = QRectF(tx, ty, tw, th)
-        aa = self._weights["aa"]
-        ee = self._weights["ee"]
-        oo = self._weights["oo"]
-        small = self._weights["small"]
-
-        width_scale = 1.0 + aa * 0.08 + ee * 0.12 - oo * 0.12 - small * 0.04
-        mouth_w = mouth_rect.width() * width_scale
-        center_x = mouth_rect.center().x()
-        center_y = mouth_rect.center().y()
-        lip_y = center_y + mouth_rect.height() * 0.04
-        line_thickness = max(1.2, mouth_rect.height() * 0.22)
-
-        # Základní linka rtů sedí přesně na ústech i v idle.
-        lip_pen = QPen(QColor(116, 82, 78, 150))
-        lip_pen.setWidthF(line_thickness)
-        lip_pen.setCapStyle(Qt.RoundCap)
-        p.setPen(lip_pen)
-        p.setBrush(Qt.NoBrush)
-        p.drawLine(
-            QPointF(center_x - mouth_w * 0.48, lip_y),
-            QPointF(center_x + mouth_w * 0.48, lip_y),
+    def _draw_voice_aurora(self, p: QPainter, target: QRectF, pulse: QColor) -> None:
+        energy = max(self._out_level, self._mouth_energy)
+        if energy <= 0.02 and self._state != "speaking":
+            return
+        band_h = target.height() * (0.10 + 0.12 * energy)
+        band_rect = QRectF(
+            target.left() - target.width() * 0.03,
+            target.center().y() + target.height() * 0.13 - band_h * 0.5,
+            target.width() * 1.06,
+            band_h,
         )
+        p.save()
+        p.setClipRect(target.adjusted(0, target.height() * 0.05, 0, -target.height() * 0.03))
+        steps = 10
+        for idx in range(steps):
+            phase = self._anim_t * (3.0 + idx * 0.25) + idx * 0.55
+            wobble = math.sin(phase) * band_rect.height() * (0.10 + 0.08 * self._aurora_bias)
+            alpha = int((22 + idx * 8) * (0.45 + energy * 0.9))
+            color = _blend_color(pulse, QColor(255, 255, 255, 220), idx / max(1, steps - 1))
+            color.setAlpha(max(0, min(255, alpha)))
+            pen = QPen(color)
+            pen.setWidthF(max(2.0, band_rect.height() * (0.18 - idx * 0.01)))
+            pen.setCapStyle(Qt.RoundCap)
+            p.setPen(pen)
+            y = band_rect.center().y() + wobble + (idx - steps / 2.0) * band_rect.height() * 0.045
+            x1 = band_rect.left() + band_rect.width() * 0.12
+            x2 = band_rect.right() - band_rect.width() * 0.12
+            curve = band_rect.height() * (0.12 + 0.30 * energy)
+            p.drawArc(
+                QRectF(x1, y - curve, x2 - x1, curve * 2.0),
+                int((16 + idx * 3) * 16),
+                int((148 + energy * 42.0) * 16),
+            )
+        p.restore()
 
-        if self._mouth_openness <= 0.03:
+    def _draw_moon(self, p: QPainter, cx: float, cy: float, radius: float, glow: QColor) -> None:
+        moon_r = radius * 0.24
+        orbit_rx = radius * 1.18
+        orbit_ry = radius * 0.54
+        angle = self._moon_angle * math.pi / 180.0
+        mx = cx + math.cos(angle) * orbit_rx
+        my = cy + math.sin(angle) * orbit_ry - radius * 0.22
+        moon = self._ensure_moon(int(moon_r * 2.0))
+        if moon is None or moon.isNull():
             return
 
-        open_h = mouth_rect.height() * (0.30 + self._mouth_openness * 1.75)
-        cavity = QRectF(
-            center_x - mouth_w * (0.34 - oo * 0.06),
-            lip_y - open_h * 0.42,
-            mouth_w * (0.68 - oo * 0.10),
-            open_h,
-        )
-        cavity_color = _blend_color(QColor(52, 10, 18, 175), QColor(100, 30, 44, 220), aa * 0.65 + ee * 0.2)
-        grad = QRadialGradient(cavity.center(), max(cavity.width(), cavity.height()) * 0.72)
-        grad.setColorAt(0.0, cavity_color)
-        grad.setColorAt(0.78, QColor(35, 7, 10, 120))
-        grad.setColorAt(1.0, QColor(8, 3, 3, 0))
+        orbit_pen = QPen(QColor(glow.red(), glow.green(), glow.blue(), 34))
+        orbit_pen.setWidthF(max(1.3, radius * 0.006))
+        p.setPen(orbit_pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QPointF(cx, cy - radius * 0.22), orbit_rx, orbit_ry)
+
+        halo = QRadialGradient(QPointF(mx, my), moon_r * 1.45)
+        halo.setColorAt(0.0, QColor(255, 255, 255, 56))
+        halo.setColorAt(1.0, QColor(0, 0, 0, 0))
         p.setPen(Qt.NoPen)
-        p.setBrush(grad)
-        radius = cavity.height() * (0.60 if oo > 0.4 else 0.35)
-        p.drawRoundedRect(cavity, radius, radius)
+        p.setBrush(halo)
+        p.drawEllipse(QPointF(mx, my), moon_r * 1.45, moon_r * 1.45)
+        p.drawImage(QRectF(mx - moon_r, my - moon_r, moon_r * 2.0, moon_r * 2.0), moon)
+
+    def _draw_error_ui(self, p: QPainter, cx: float, cy: float, radius: float, rim: QColor) -> None:
+        if self._state != "error":
+            self._reset_rect = QRectF()
+            return
+        msg = self._error_text or "Klikni pro reset"
+        text_rect = QRectF(cx - radius * 0.92, cy + radius * 0.86, radius * 1.84, radius * 0.36)
+        p.setPen(rim)
+        font = QFont(self.font())
+        font.setPointSizeF(max(9.0, radius * 0.075))
+        font.setBold(True)
+        p.setFont(font)
+        p.drawText(text_rect, Qt.AlignCenter | Qt.TextWordWrap, msg)
+
+        button_rect = QRectF(cx - radius * 0.40, cy + radius * 1.16, radius * 0.80, radius * 0.22)
+        self._reset_rect = button_rect
+        p.setPen(QPen(rim, max(1.8, radius * 0.01)))
+        p.setBrush(QColor(255, 255, 255, 18))
+        p.drawRoundedRect(button_rect, radius * 0.08, radius * 0.08)
+        font.setPointSizeF(max(8.5, radius * 0.060))
+        p.setFont(font)
+        p.drawText(button_rect, Qt.AlignCenter, "RESET")
 
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform, True)
-        if self._source.isNull():
-            return
 
-        w = float(self.width())
-        h = float(self.height())
-        accent, rim = self._state_colors()
+        w, h = self.width(), self.height()
+        cx, cy = w / 2.0, h / 2.0
+        radius = min(w, h) * 0.285
         t = self._anim_t
-        breathe = 1.0 + 0.016 * math.sin(t * (0.8 if self._state == "idle" else 1.1))
-        scale = breathe * (1.0 + self._out_level * 0.02)
-        target_h = h * 0.78 * scale
-        target_w = target_h * (self._source.width() / max(1.0, self._source.height()))
-        cx = w * 0.5
-        cy = h * 0.47
+        glow, rim, pulse = self._state_colors()
 
-        dx = 0.0
-        dy = math.sin(t * 1.2) * h * 0.007
-        if self._state == "listening":
-            dx += math.sin(t * 3.0) * w * 0.008 * (0.35 + self._in_level)
-        elif self._state == "thinking":
-            dx += math.sin(t * 1.6) * w * 0.009
-            dy -= abs(math.sin(t * 1.2)) * h * 0.008
-        elif self._state == "speaking":
-            dx += math.sin(t * 6.0) * w * 0.005 * self._out_level
-            dy -= self._out_level * h * 0.008
-        elif self._state == "error" and self._error_t0 > 0.0:
-            elapsed = max(0.0, time.perf_counter() - self._error_t0)
-            amp = 18.0 * math.exp(-elapsed / 0.8)
-            dx += amp * (math.sin(elapsed * 34.0) + 0.5 * math.sin(elapsed * 59.0))
-            if elapsed > 1.3:
+        if self._state == "error" and self._error_t0 > 0.0:
+            e = max(0.0, time.perf_counter() - self._error_t0)
+            amp = 9.0 * math.exp(-e / 0.75)
+            cx += amp * (math.sin(e * 34.0) + 0.4 * math.sin(e * 57.0))
+            cy += amp * (math.sin(e * 40.0 + 0.7) + 0.4 * math.sin(e * 62.0 + 0.4))
+            if e > 1.3:
                 self._error_t0 = 0.0
 
-        head_rect = QRectF(cx - target_w / 2.0, cy - target_h / 2.0, target_w, target_h)
-        radius = max(target_w, target_h) * 0.42
-
-        glow = QRadialGradient(QPointF(cx + dx, cy + dy), radius)
-        glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 88))
-        glow.setColorAt(0.55, QColor(accent.red(), accent.green(), accent.blue(), 30))
-        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
-        p.setPen(Qt.NoPen)
-        p.setBrush(glow)
-        p.drawEllipse(QPointF(cx + dx, cy + dy), radius, radius)
-
-        shadow = QRadialGradient(QPointF(cx + dx, head_rect.bottom() - target_h * 0.07), target_w * 0.36)
-        shadow.setColorAt(0.0, QColor(0, 0, 0, 130))
-        shadow.setColorAt(1.0, QColor(0, 0, 0, 0))
-        p.setBrush(shadow)
-        p.drawEllipse(QPointF(cx + dx, head_rect.bottom() - target_h * 0.07), target_w * 0.34, target_h * 0.07)
-
-        angle = math.sin(t * 0.85) * 0.9
-        if self._state == "listening":
-            angle += math.sin(t * 2.8) * (0.8 + self._in_level * 0.8)
-        elif self._state == "thinking":
-            angle += math.sin(t * 1.4) * 1.6
+        breathe = 1.0 + 0.020 * math.sin(t * 0.95) + 0.010 * math.sin(t * 2.15 + 0.6)
+        if self._state == "thinking":
+            breathe += 0.018 * math.sin(t * 1.45)
+        elif self._state == "listening":
+            breathe += self._in_level * 0.030
         elif self._state == "speaking":
-            angle += math.sin(t * 6.0) * (0.6 + self._out_level * 0.8)
+            breathe += max(self._out_level, self._mouth_energy) * 0.050
+        radius *= max(0.88, min(1.28, breathe))
 
-        p.save()
-        p.translate(head_rect.center())
-        p.translate(dx, dy)
-        p.rotate(angle)
-        p.translate(-head_rect.center())
-        p.drawImage(head_rect, self._source)
-        self._draw_mouth_overlay(p, head_rect)
-        p.restore()
+        self._draw_background_glow(p, cx, cy, radius, glow)
+        self._draw_signal_rings(p, cx, cy, radius, rim, pulse)
 
-        self._draw_state_overlays(p, cx + dx, cy + dy, max(target_w, target_h) * 0.40, accent, rim)
+        shadow = QRadialGradient(QPointF(cx + radius * 0.16, cy + radius * 0.20), radius * 1.20)
+        shadow.setColorAt(0.0, QColor(0, 0, 0, 110))
+        shadow.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(shadow)
+        p.drawEllipse(QPointF(cx + radius * 0.10, cy + radius * 0.13), radius * 1.06, radius * 1.06)
 
-        if self._state == "error":
-            p.setPen(QColor(255, 225, 225, 235))
-            font = QFont()
-            font.setPointSize(12)
-            font.setBold(True)
-            p.setFont(font)
-            msg = (self._error_text or "Došlo k chybě.").splitlines()[0].strip()
-            p.drawText(QRectF(0.0, head_rect.bottom() + 10.0, w, 28.0), Qt.AlignHCenter | Qt.AlignTop, msg)
+        planet = self._ensure_planet(int(radius * 2.0))
+        target = QRectF(cx - radius, cy - radius, radius * 2.0, radius * 2.0)
+        if planet is not None and not planet.isNull():
+            p.drawImage(target, planet)
 
-            self._reset_rect = QRectF(cx - 75.0, head_rect.bottom() + 40.0, 150.0, 38.0)
-            p.setPen(QColor(255, 200, 200, 200))
-            p.setBrush(QColor(255, 120, 120, 42))
-            p.drawRoundedRect(self._reset_rect, 10.0, 10.0)
-            p.drawText(self._reset_rect, Qt.AlignCenter, "Reset")
-        elif not self._running and self._state == "idle":
-            p.setPen(QColor(220, 220, 220, 190))
-            font = QFont()
-            font.setPointSize(12)
-            p.setFont(font)
-            p.drawText(QRectF(0.0, head_rect.bottom() + 10.0, w, 30.0), Qt.AlignHCenter | Qt.AlignTop, "Klikni na hlavu pro nonstop režim")
+        vign = QRadialGradient(QPointF(cx - radius * 0.24, cy - radius * 0.28), radius * 1.34)
+        vign.setColorAt(0.0, QColor(255, 255, 255, 30))
+        vign.setColorAt(0.52, QColor(255, 255, 255, 8))
+        vign.setColorAt(1.0, QColor(0, 0, 0, 115))
+        p.setBrush(vign)
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(target)
+
+        atmosphere = QRadialGradient(QPointF(cx - radius * 0.30, cy - radius * 0.32), radius * 1.16)
+        atmosphere.setColorAt(0.0, QColor(255, 255, 255, 54))
+        atmosphere.setColorAt(0.46, QColor(110, 208, 255, 26))
+        atmosphere.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setBrush(atmosphere)
+        p.drawEllipse(QPointF(cx, cy), radius * 1.02, radius * 1.02)
+
+        self._draw_voice_aurora(p, target, pulse)
+        self._draw_moon(p, cx, cy, radius, glow)
+        self._draw_error_ui(p, cx, cy, radius, rim)
