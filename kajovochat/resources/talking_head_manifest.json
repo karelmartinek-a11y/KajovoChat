@@ -1,0 +1,230 @@
+{
+  "meta": {
+    "name": "kajovo_talking_head",
+    "version": 1,
+    "description": "Datově řízený rig pro nový TalkingHeadWidget.",
+    "default_mode": "auto"
+  },
+  "canvas": {
+    "width": 1024,
+    "height": 1024,
+    "safe_margin": 0.08
+  },
+  "fallback": {
+    "enabled": true,
+    "mode": "photo_rig",
+    "base_layer": "fallback_head",
+    "base_asset": "head_photo.png",
+    "allows_independent_eyes": false,
+    "force_when_production_incomplete": true,
+    "asymmetry_limit": 0.018,
+    "mouth_darkening_limit": 0.82,
+    "uncanny_avoidance": {
+      "max_corner_stretch": 0.12,
+      "max_upper_lip_raise": 0.18,
+      "max_cheek_compression": 0.11,
+      "focus_lock_strength": 0.94
+    }
+  },
+  "layers": {
+    "fallback": [
+      {
+        "name": "fallback_head",
+        "role": "head_base",
+        "path": "head_photo.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5,
+        "pivot_x": 0.5,
+        "pivot_y": 0.5,
+        "opacity": 1.0,
+        "enabled": true
+      },
+      {
+        "name": "fallback_face_shadow",
+        "role": "shadow_polish",
+        "path": "head_photo.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5,
+        "pivot_x": 0.5,
+        "pivot_y": 0.5,
+        "opacity": 0.16,
+        "enabled": true
+      },
+      {
+        "name": "fallback_cheek_polish",
+        "role": "cheek_polish",
+        "path": "head_photo.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5,
+        "pivot_x": 0.5,
+        "pivot_y": 0.5,
+        "opacity": 0.12,
+        "enabled": true
+      }
+    ],
+    "production": [
+      {
+        "name": "prod_head_base",
+        "role": "head_base",
+        "path": "talking_head/head_base.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5,
+        "pivot_x": 0.5,
+        "pivot_y": 0.5,
+        "opacity": 1.0,
+        "enabled": true
+      },
+      {
+        "name": "prod_eye_layer",
+        "role": "eyes",
+        "path": "talking_head/eyes.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5,
+        "pivot_x": 0.5,
+        "pivot_y": 0.5,
+        "opacity": 1.0,
+        "enabled": true
+      },
+      {
+        "name": "prod_mouth_upper",
+        "role": "mouth_upper",
+        "path": "talking_head/mouth_upper.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5,
+        "pivot_x": 0.5,
+        "pivot_y": 0.5,
+        "opacity": 1.0,
+        "enabled": true
+      },
+      {
+        "name": "prod_mouth_lower",
+        "role": "mouth_lower",
+        "path": "talking_head/mouth_lower.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5,
+        "pivot_x": 0.5,
+        "pivot_y": 0.5,
+        "opacity": 1.0,
+        "enabled": true
+      }
+    ]
+  },
+  "pivots": {
+    "head_center": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "eye_left": {
+      "x": 0.405,
+      "y": 0.352
+    },
+    "eye_right": {
+      "x": 0.595,
+      "y": 0.352
+    },
+    "mouth_center": {
+      "x": 0.518,
+      "y": 0.456
+    }
+  },
+  "masks": {
+    "mouth_soft": {
+      "path": "head_photo.png",
+      "kind": "alpha_source",
+      "enabled": false
+    },
+    "blink_soft": {
+      "path": "head_photo.png",
+      "kind": "alpha_source",
+      "enabled": false
+    }
+  },
+  "deformation_ranges": {
+    "mouth": {
+      "x": 0.436,
+      "y": 0.442,
+      "width": 0.168,
+      "height": 0.032,
+      "jaw_split": 0.55,
+      "jaw_drop_scale": 0.58,
+      "max_jaw_open": 0.84,
+      "corner_stretch_max": 0.12,
+      "upper_lip_raise_max": 0.18,
+      "round_width_compensation": 0.13
+    },
+    "eyes": {
+      "left_x": 0.334,
+      "right_x": 0.526,
+      "y": 0.314,
+      "width": 0.134,
+      "height": 0.046
+    },
+    "cheeks": {
+      "y": 0.458,
+      "offset_x": 0.15,
+      "width": 0.132,
+      "height": 0.084,
+      "compression_max": 0.11
+    }
+  },
+  "z_order": {
+    "fallback": [
+      "fallback_head",
+      "fallback_face_shadow",
+      "fallback_cheek_polish"
+    ],
+    "production": [
+      "prod_head_base",
+      "prod_eye_layer",
+      "prod_mouth_upper",
+      "prod_mouth_lower"
+    ],
+    "overlay": [
+      "mouth_interior",
+      "blink_overlay",
+      "state_overlay"
+    ]
+  },
+  "state_presets": {
+    "idle": {
+      "head_scale": 1.0,
+      "overlay_strength": 0.42,
+      "head_tx_scale": 0.05,
+      "head_ty_scale": 0.05,
+      "head_rot_deg": 5.8,
+      "speech_scale_boost": 0.008
+    },
+    "listening": {
+      "head_scale": 1.008,
+      "overlay_strength": 0.58,
+      "head_tx_scale": 0.052,
+      "head_ty_scale": 0.053,
+      "head_rot_deg": 5.9,
+      "speech_scale_boost": 0.008
+    },
+    "thinking": {
+      "head_scale": 1.004,
+      "overlay_strength": 0.52,
+      "head_tx_scale": 0.051,
+      "head_ty_scale": 0.052,
+      "head_rot_deg": 6.0,
+      "speech_scale_boost": 0.008
+    },
+    "speaking": {
+      "head_scale": 1.01,
+      "overlay_strength": 0.64,
+      "head_tx_scale": 0.054,
+      "head_ty_scale": 0.055,
+      "head_rot_deg": 6.2,
+      "speech_scale_boost": 0.01
+    },
+    "error": {
+      "head_scale": 1.0,
+      "overlay_strength": 0.88,
+      "head_tx_scale": 0.03,
+      "head_ty_scale": 0.03,
+      "head_rot_deg": 3.2,
+      "speech_scale_boost": 0.0
+    }
+  }
+}

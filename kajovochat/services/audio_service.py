@@ -471,16 +471,32 @@ class AudioPlayer:
         except Exception:
             return 0.0
 
-    def get_lipsync_snapshot(self) -> dict[str, object]:
+    def get_lipsync_snapshot(self, *, rich: bool = False) -> dict[str, object]:
         try:
-            snap = self._lip_sync.snapshot()
-            return {
-                "pose": snap.pose,
-                "openness": snap.openness,
-                "energy": snap.energy,
-                "weights": dict(snap.weights),
-            }
+            return self._lip_sync.snapshot_dict(rich=rich)
         except Exception:
+            if rich:
+                return {
+                    "timestamp_s": 0.0,
+                    "cluster": "sil",
+                    "pose": "closed",
+                    "openness": 0.0,
+                    "energy": 0.0,
+                    "speech_energy": 0.0,
+                    "voicing_confidence": 0.0,
+                    "attack": 0.0,
+                    "jaw_open": 0.0,
+                    "mouth_open": 0.0,
+                    "lip_funnel": 0.0,
+                    "lip_round": 0.0,
+                    "lip_spread": 0.0,
+                    "lip_press": 0.2,
+                    "upper_lip_raise": 0.0,
+                    "lower_lip_drop": 0.0,
+                    "cheek_raise": 0.0,
+                    "weights": {"sil": 1.0, "aa": 0.0, "ee": 0.0, "ih": 0.0, "oh": 0.0, "oo": 0.0, "fv": 0.0, "mbp": 0.0, "lntd": 0.0, "szchj": 0.0, "wq": 0.0},
+                    "legacy_weights": {"closed": 1.0, "small": 0.0, "aa": 0.0, "ee": 0.0, "oo": 0.0},
+                }
             return {
                 "pose": "closed",
                 "openness": 0.0,

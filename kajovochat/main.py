@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 import sys
 import queue
 import re
@@ -42,6 +44,7 @@ from .services.log_service import RealtimeLogWriter
 from .services.app_logging import install_app_logging
 from .resources.assets import verify_asset_manifest
 from .widgets.head_widget import HeadWidget
+from .widgets.talking_head_widget import TalkingHeadWidget
 from .widgets.globe_button import GlobeButton
 from .theme import Theme, app_stylesheet
 
@@ -79,6 +82,9 @@ _ECHO_SIMILARITY_DROP = 0.82
 _ECHO_SIMILARITY_SOFT = 0.68
 _BARGE_IN_MIN_INPUT_LEVEL = 0.06
 _BARGE_IN_OUTPUT_RATIO = 1.35
+_HEAD_WIDGET_MODE_ENV = "KAJOVOCHAT_HEAD_WIDGET"
+_HEAD_WIDGET_MODE_TALKING = "talking"
+_HEAD_WIDGET_MODE_LEGACY = "legacy"
 
 
 def _closed_pose_snapshot() -> dict[str, object]:
@@ -884,6 +890,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = settings
         self._handsfree_running = False
+        self._head_runtime_notice = ""
+        self._head_widget_mode = _HEAD_WIDGET_MODE_TALKING
 
         self._thread = QThread(self)
         self.worker = ConversationWorker(self.settings)
@@ -993,9 +1001,11 @@ class MainWindow(QMainWindow):
         earth_path = str(Path(__file__).resolve().parent / "resources" / "assets" / "earth_hd.png")
         earth_clouds_path = str(Path(__file__).resolve().parent / "resources" / "assets" / "earth_clouds_hd.png")
 
-        self.head = HeadWidget(head_path)
+        self.head = self._create_head_widget(head_path)
         self.head.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.head.setMinimumSize(520, 520)
+        if self._head_runtime_notice:
+            self.head.setToolTip(self._head_runtime_notice)
 
         self.globe = GlobeButton(earth_path, earth_clouds_path)
 
@@ -1008,6 +1018,32 @@ class MainWindow(QMainWindow):
         outer.addLayout(center, 1)
 
         # App-wide stylesheet is installed on QApplication; keep per-widget overrides minimal.
+
+    def _create_head_widget(self, head_path: str) -> QWidget:
+        logger = logging.getLogger("kajovochat")
+        requested_mode = (os.getenv(_HEAD_WIDGET_MODE_ENV, _HEAD_WIDGET_MODE_TALKING) or _HEAD_WIDGET_MODE_TALKING).strip().lower()
+
+        if requested_mode == _HEAD_WIDGET_MODE_LEGACY:
+            self._head_widget_mode = _HEAD_WIDGET_MODE_LEGACY
+            self._head_runtime_notice = "Vizualizace hlavy běží v kompatibilním legacy režimu podle feature flagu."
+            return HeadWidget(head_path)
+
+        try:
+            widget = TalkingHeadWidget(head_path)
+            self._head_widget_mode = _HEAD_WIDGET_MODE_TALKING
+            if widget.rig_definition.fallback_mode:
+                issues = list(widget.rig_definition.issues)
+                detail = issues[0] if issues else "Production rig není dostupný."
+                self._head_runtime_notice = f"Talking head běží ve fallback rigu. {detail}"
+                logger.warning("talking_head_fallback_mode: %s", "; ".join(issues) if issues else detail)
+            else:
+                self._head_runtime_notice = "Talking head běží v production rigu."
+            return widget
+        except Exception as exc:
+            logger.exception("talking_head_widget_init_failed")
+            self._head_widget_mode = _HEAD_WIDGET_MODE_LEGACY
+            self._head_runtime_notice = f"Talking head se nepodařilo inicializovat, používám legacy hlavu: {exc}"
+            return HeadWidget(head_path)
 
     def _wire(self) -> None:
         self.btn_exit.clicked.connect(lambda _=False: self.close())
@@ -1051,6 +1087,25 @@ class MainWindow(QMainWindow):
         self.settings.save()
         QMessageBox.information(self, "SAVE", "Aktuální nastavení bylo uloženo jako výchozí.")
 
+    def _compose_startup_caption(self, base: str) -> str:
+        notice = (self._head_runtime_notice or "").strip()
+        if not notice:
+            return base
+        if not base:
+            return notice
+        return f"{notice}\n{base}"
+
+    def _apply_head_runtime_notice(self) -> None:
+        notice = (self._head_runtime_notice or "").strip()
+        if not notice:
+            return
+        current = (self.captions.text() or "").strip()
+        if not current:
+            self.captions.setText(notice)
+            return
+        if notice not in current:
+            self.captions.setText(f"{notice}\n{current}")
+
     def _clear_session(self) -> None:
         try:
             self.sig_request_stop.emit()
@@ -1062,8 +1117,9 @@ class MainWindow(QMainWindow):
         self.head.set_running(False)
         self.head.set_error_text("")
         self.head.set_lipsync_snapshot(_closed_pose_snapshot())
+        self._apply_head_runtime_notice()
         if not self.settings.openai_api_key:
-            self.captions.setText("Chybí OpenAI API key. Otevřete dialog OpenAI a vložte klíč.")
+            self.captions.setText(self._compose_startup_caption("Chybí OpenAI API key. Otevřete dialog OpenAI a vložte klíč."))
 
     @Slot()
     def _on_orb_click(self) -> None:
@@ -1078,7 +1134,7 @@ class MainWindow(QMainWindow):
         self.globe.setEnabled(False)
         self._handsfree_running = True
         self.head.set_running(True)
-        self.captions.setText("Hands-free: aktivní")  # immediate UI feedback
+        self.captions.setText(self._compose_startup_caption("Hands-free: aktivní"))  # immediate UI feedback
         self.sig_start_handsfree.emit()
 
     @Slot()
@@ -1093,6 +1149,7 @@ class MainWindow(QMainWindow):
         self.head.set_running(False)
         self.head.set_error_text("")
         self.head.set_lipsync_snapshot(_closed_pose_snapshot())
+        self._apply_head_runtime_notice()
 
     @Slot(float)
     def _on_input_level(self, lvl: float) -> None:
@@ -1131,6 +1188,8 @@ class MainWindow(QMainWindow):
         else:
             # Clear stale error message.
             self.head.set_error_text("")
+            if s == _STATE_IDLE and not self._handsfree_running:
+                self._apply_head_runtime_notice()
 
     @Slot(str)
     def _on_captions(self, text: str) -> None:
@@ -1172,7 +1231,9 @@ def main() -> None:
     app.setStyleSheet(app_stylesheet())
     w = MainWindow(settings)
     if not settings.openai_api_key:
-        QTimer.singleShot(0, lambda: w.captions.setText("Chybí OpenAI API key. Otevřete dialog OpenAI a vložte klíč."))
+        QTimer.singleShot(0, lambda: w.captions.setText(w._compose_startup_caption("Chybí OpenAI API key. Otevřete dialog OpenAI a vložte klíč.")))
+    else:
+        QTimer.singleShot(0, w._apply_head_runtime_notice)
     w.showMaximized()
     sys.exit(app.exec())
 
