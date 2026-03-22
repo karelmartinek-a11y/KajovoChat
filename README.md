@@ -4,19 +4,18 @@ Desktop aplikace v `PySide6` pro hlasovou konverzaci přes OpenAI Realtime API.
 
 ## Co aplikace umí
 
-- hands-free hlasovou konverzaci přes klik na orb asistenta
-- push-to-talk přes tlačítko zeměkoule
-- shader-based living orb renderer s audio-reaktivní animací podle skutečně přehrávaného audia
+- hands-free hlasovou konverzaci přes tlačítko `Start` v záhlaví
+- bezpečné zadání a lokální uložení OpenAI API klíče přímo v hlavním okně
+- EKG vizualizaci reagující na hlas a terminálový přepis posledních 10 řádků diskuze
 - barge-in během mluvení asistenta
 - softwarové tlumení self-hearing na notebookových reproduktorech
+- malý audio selftest v záhlaví
 
 ## Požadavky
 
 - Python `3.11+`
 - funkční mikrofon a reproduktory nebo sluchátka
 - platný OpenAI API klíč
-- GPU/driver s podporou OpenGL pro plnou living orb cestu
-
 ## Instalace
 
 ```bash
@@ -47,7 +46,7 @@ python -m kajovochat.orb_demo
 
 ## OpenAI klíč
 
-Po spuštění otevřete dialog `OpenAI` a vložte API klíč. Klíč se ve Windows ukládá přes DPAPI, na ostatních platformách přes systémový keyring, pokud je dostupný.
+Po spuštění vložte OpenAI API klíč přímo do pole v záhlaví a potvrďte `Uložit klíč`. Klíč se ve Windows ukládá přes DPAPI, na ostatních platformách přes systémový keyring, pokud je dostupný.
 
 ## Konfigurace
 
@@ -60,7 +59,7 @@ Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. Te
 - `kajovochat/settings.py` minimální produktové nastavení a systémový prompt
 - `kajovochat/services/` audio, realtime websocket, OpenAI služby a logování
 - `kajovochat/widgets/` vlastní UI widgety
-- `kajovochat/orb/` GPU living orb engine, audio analýza, stavový blending a shader renderer
+- `kajovochat/orb/` původní orb engine ponechaný kvůli kompatibilitě a testům starších částí
 - `kajovochat/resources/assets/` obrázkové assety
 - `tests/` testy
 

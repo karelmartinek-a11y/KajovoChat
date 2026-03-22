@@ -55,6 +55,18 @@ class RecordResult:
     rms_median: float
 
 
+@dataclass
+class AudioCalibrationResult:
+    input_device: Optional[int]
+    output_device: Optional[int]
+    ambient_rms: float
+    playback_rms: float
+    bleed_ratio: float
+    similarity: float
+    recommended_profile: dict[str, float]
+    notes: list[str]
+
+
 def list_audio_devices() -> dict:
     """List audio devices for UI selection.
 
@@ -207,6 +219,265 @@ def format_device_help() -> str:
 def _rms(x: np.ndarray) -> float:
     x = np.asarray(x).reshape(-1)
     return float(np.sqrt(np.mean(np.square(x)) + 1e-12))
+
+
+def _normalized_similarity(reference: np.ndarray, recorded: np.ndarray, max_shift_samples: int) -> float:
+    ref = np.asarray(reference, dtype=np.float32).reshape(-1)
+    rec = np.asarray(recorded, dtype=np.float32).reshape(-1)
+    if ref.size < 64 or rec.size < 64:
+        return 0.0
+
+    ref = ref - float(np.mean(ref))
+    rec = rec - float(np.mean(rec))
+    ref_norm = float(np.linalg.norm(ref) + 1e-6)
+    rec_norm = float(np.linalg.norm(rec) + 1e-6)
+    if ref_norm <= 1e-6 or rec_norm <= 1e-6:
+        return 0.0
+
+    best = 0.0
+    max_shift_samples = max(0, int(max_shift_samples))
+    for shift in range(0, max_shift_samples + 1, max(1, max_shift_samples // 16 or 1)):
+        usable = min(ref.size, rec.size - shift)
+        if usable < 64:
+            continue
+        ref_seg = ref[:usable]
+        rec_seg = rec[shift : shift + usable]
+        corr = abs(float(np.dot(ref_seg, rec_seg)) / (float(np.linalg.norm(ref_seg) + 1e-6) * float(np.linalg.norm(rec_seg) + 1e-6)))
+        if corr > best:
+            best = corr
+    return float(max(0.0, min(1.0, best)))
+
+
+def suppress_echo_from_pcm16(
+    mic_pcm: bytes,
+    reference: np.ndarray,
+    *,
+    max_shift_samples: int = 960,
+) -> tuple[bytes, float]:
+    """Zkusí odečíst referenční playback z mikrofonního chunku."""
+    if not mic_pcm:
+        return b"", 0.0
+
+    mic = np.frombuffer(mic_pcm, dtype=np.int16).astype(np.float32)
+    ref = np.asarray(reference, dtype=np.int16).astype(np.float32).reshape(-1)
+    if mic.size < 120 or ref.size < mic.size:
+        return mic_pcm, 0.0
+
+    best_similarity = 0.0
+    best_shift = 0
+    best_segment: Optional[np.ndarray] = None
+    max_shift_samples = max(0, int(max_shift_samples))
+    mic_centered = mic - float(np.mean(mic))
+    mic_norm = float(np.linalg.norm(mic_centered) + 1e-6)
+    if mic_norm <= 1e-6:
+        return mic_pcm, 0.0
+
+    for shift in range(0, max_shift_samples + 1, 120):
+        segment = ref[ref.size - mic.size - shift : ref.size - shift if shift > 0 else ref.size]
+        if segment.size != mic.size:
+            continue
+        segment_centered = segment - float(np.mean(segment))
+        seg_norm = float(np.linalg.norm(segment_centered) + 1e-6)
+        if seg_norm <= 1e-6:
+            continue
+        similarity = abs(float(np.dot(mic_centered, segment_centered)) / (mic_norm * seg_norm))
+        if similarity > best_similarity:
+            best_similarity = similarity
+            best_shift = shift
+            best_segment = segment
+
+    if best_segment is None or best_similarity < 0.08:
+        return mic_pcm, float(best_similarity)
+
+    ref_centered = best_segment - float(np.mean(best_segment))
+    denom = float(np.dot(ref_centered, ref_centered) + 1e-6)
+    gain = float(np.dot(mic_centered, ref_centered) / denom)
+    gain = max(0.0, min(1.15, gain))
+    cleaned = mic - (ref_centered * gain)
+    if best_similarity >= 0.28:
+        cleaned -= ref_centered * min(0.18, best_similarity * 0.22)
+    cleaned = np.clip(cleaned, -32768.0, 32767.0).astype(np.int16)
+    return cleaned.tobytes(), float(best_similarity)
+
+
+def _playrec_with_fallbacks(
+    playback_buffer: np.ndarray,
+    *,
+    samplerate: int,
+    input_device: Optional[int],
+    output_device: Optional[int],
+) -> np.ndarray:
+    attempts = [
+        {"device": (input_device, output_device)},
+        {"device": (None, output_device)},
+        {"device": None},
+    ]
+    last_error: Optional[Exception] = None
+    for attempt in attempts:
+        try:
+            return np.asarray(
+                sd.playrec(
+                    playback_buffer.reshape(-1, 1),
+                    samplerate=samplerate,
+                    channels=1,
+                    dtype="float32",
+                    device=attempt["device"],
+                    blocking=True,
+                ),
+                dtype=np.float32,
+            ).reshape(-1)
+        except Exception as exc:
+            last_error = exc
+            continue
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Audio kalibraci se nepodařilo spustit.")
+
+
+def calibrate_audio_devices(
+    *,
+    input_device: Optional[int],
+    output_device: Optional[int],
+    samplerate: int = 24000,
+    playback_seconds: float = 1.8,
+    playback_gain: float = 0.28,
+) -> AudioCalibrationResult:
+    """Automaticky změří bleed mezi reproduktorem a mikrofonem a navrhne guard profil."""
+    samplerate = int(samplerate)
+    ambient_frames = max(1, int(samplerate * 0.45))
+    playback_frames = max(1, int(samplerate * max(1.2, playback_seconds)))
+    total_frames = ambient_frames + playback_frames
+
+    probe_time = np.linspace(0.0, playback_frames / samplerate, playback_frames, endpoint=False, dtype=np.float32)
+    chirp = signal.chirp(probe_time, f0=180.0, f1=4200.0, t1=max(0.1, playback_seconds), method="logarithmic")
+    envelope = np.hanning(playback_frames).astype(np.float32)
+    pulse = np.sin(2.0 * np.pi * 42.0 * probe_time).astype(np.float32)
+    playback_signal = ((chirp * 0.72) + (pulse * 0.28)) * envelope * float(playback_gain)
+    playback_buffer = np.concatenate(
+        [
+            np.zeros((ambient_frames,), dtype=np.float32),
+            playback_signal.astype(np.float32),
+        ]
+    )
+
+    recorded = _playrec_with_fallbacks(
+        playback_buffer,
+        samplerate=samplerate,
+        input_device=input_device,
+        output_device=output_device,
+    )
+    if recorded.size < total_frames:
+        padded = np.zeros((total_frames,), dtype=np.float32)
+        padded[: recorded.size] = recorded
+        recorded = padded
+
+    ambient = recorded[:ambient_frames]
+    captured = recorded[ambient_frames : ambient_frames + playback_frames]
+
+    ambient_rms = _rms(ambient)
+    playback_rms = _rms(captured)
+    bleed_ratio = float(playback_rms / max(ambient_rms, 1e-4))
+    similarity = _normalized_similarity(playback_signal, captured, max_shift_samples=int(samplerate * 0.12))
+
+    recommended_profile = {
+        "server_vad_threshold": float(np.clip(0.72 + max(0.0, similarity - 0.45) * 0.18 + max(0.0, min(0.18, ambient_rms)) * 0.55, 0.68, 0.9)),
+        "playback_activity_level": float(np.clip(max(0.028, playback_rms * 0.45), 0.028, 0.16)),
+        "echo_similarity_drop": float(np.clip(0.78 + similarity * 0.14, 0.78, 0.96)),
+        "echo_similarity_soft": float(np.clip(0.6 + similarity * 0.12, 0.58, 0.86)),
+        "barge_in_min_input_level": float(np.clip(max(0.05, ambient_rms * 4.2, playback_rms * 0.3), 0.05, 0.22)),
+        "barge_in_output_ratio": float(np.clip(1.2 + min(bleed_ratio, 8.0) * 0.06, 1.2, 1.8)),
+    }
+    if recommended_profile["echo_similarity_soft"] >= recommended_profile["echo_similarity_drop"]:
+        recommended_profile["echo_similarity_soft"] = round(recommended_profile["echo_similarity_drop"] - 0.05, 3)
+
+    notes = [
+        f"ambient_rms={ambient_rms:.4f}",
+        f"playback_rms={playback_rms:.4f}",
+        f"bleed_ratio={bleed_ratio:.2f}",
+        f"similarity={similarity:.3f}",
+    ]
+    return AudioCalibrationResult(
+        input_device=input_device,
+        output_device=output_device,
+        ambient_rms=ambient_rms,
+        playback_rms=playback_rms,
+        bleed_ratio=bleed_ratio,
+        similarity=similarity,
+        recommended_profile=recommended_profile,
+        notes=notes,
+    )
+
+
+def calibrate_audio_devices_advanced(
+    *,
+    input_device: Optional[int],
+    output_device: Optional[int],
+    samplerate: int = 24000,
+) -> AudioCalibrationResult:
+    """Víceprůchodová kalibrace s různou délkou a hlasitostí testovacího signálu."""
+    samplerates = [int(samplerate), 48000, 44100]
+    passes = [
+        {"playback_seconds": 1.4, "playback_gain": 0.18},
+        {"playback_seconds": 1.8, "playback_gain": 0.24},
+        {"playback_seconds": 2.2, "playback_gain": 0.30},
+    ]
+    results: list[AudioCalibrationResult] = []
+    errors: list[str] = []
+    for current_samplerate in samplerates:
+        for current in passes:
+            try:
+                results.append(
+                    calibrate_audio_devices(
+                        input_device=input_device,
+                        output_device=output_device,
+                        samplerate=int(current_samplerate),
+                        playback_seconds=float(current["playback_seconds"]),
+                        playback_gain=float(current["playback_gain"]),
+                    )
+                )
+            except Exception as exc:
+                errors.append(f"{current_samplerate}Hz/{current['playback_gain']:.2f}: {exc}")
+
+    if not results:
+        raise RuntimeError("Pokročilá audio kalibrace selhala: " + " | ".join(errors[:4]))
+
+    if len(results) > 4:
+        # Drž jen reprezentativní podmnožinu, aby nebyl profil přehnaně rozkolísaný.
+        results = results[:4]
+
+    ambient_values = np.asarray([item.ambient_rms for item in results], dtype=np.float32)
+    playback_values = np.asarray([item.playback_rms for item in results], dtype=np.float32)
+    bleed_values = np.asarray([item.bleed_ratio for item in results], dtype=np.float32)
+    similarity_values = np.asarray([item.similarity for item in results], dtype=np.float32)
+
+    recommended_profile = {
+        "server_vad_threshold": float(max(item.recommended_profile["server_vad_threshold"] for item in results)),
+        "playback_activity_level": float(np.median([item.recommended_profile["playback_activity_level"] for item in results])),
+        "echo_similarity_drop": float(max(item.recommended_profile["echo_similarity_drop"] for item in results)),
+        "echo_similarity_soft": float(np.median([item.recommended_profile["echo_similarity_soft"] for item in results])),
+        "barge_in_min_input_level": float(max(item.recommended_profile["barge_in_min_input_level"] for item in results)),
+        "barge_in_output_ratio": float(max(item.recommended_profile["barge_in_output_ratio"] for item in results)),
+    }
+    if recommended_profile["echo_similarity_soft"] >= recommended_profile["echo_similarity_drop"]:
+        recommended_profile["echo_similarity_soft"] = round(recommended_profile["echo_similarity_drop"] - 0.05, 3)
+
+    notes = [
+        f"passes={len(results)}",
+        f"ambient_med={float(np.median(ambient_values)):.4f}",
+        f"playback_med={float(np.median(playback_values)):.4f}",
+        f"bleed_peak={float(np.max(bleed_values)):.2f}",
+        f"similarity_peak={float(np.max(similarity_values)):.3f}",
+    ]
+    return AudioCalibrationResult(
+        input_device=input_device,
+        output_device=output_device,
+        ambient_rms=float(np.median(ambient_values)),
+        playback_rms=float(np.median(playback_values)),
+        bleed_ratio=float(np.max(bleed_values)),
+        similarity=float(np.max(similarity_values)),
+        recommended_profile=recommended_profile,
+        notes=notes,
+    )
 
 
 class AudioRecorder:
@@ -771,4 +1042,3 @@ class VADMonitor:
         except Exception:
             # If mic cannot be opened concurrently, monitoring degrades gracefully.
             return
-

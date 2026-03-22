@@ -4,7 +4,7 @@ import base64
 import ctypes
 import json
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +53,15 @@ STYLE_PROMPTS = {
         "Odpovídej analyticky a strukturovaně. Pracuj explicitně s předpoklady, nejistotou a důvody závěrů."
     ),
     "normální": "Odpovídej přirozeně, užitečně a věcně jako běžný hlasový asistent.",
+}
+
+DEFAULT_AUDIO_GUARD_PROFILE = {
+    "server_vad_threshold": 0.72,
+    "playback_activity_level": 0.035,
+    "echo_similarity_drop": 0.82,
+    "echo_similarity_soft": 0.68,
+    "barge_in_min_input_level": 0.06,
+    "barge_in_output_ratio": 1.35,
 }
 
 
@@ -258,6 +267,7 @@ class AppSettings:
     response_style: str = "normální"
     log_dir: str = str((Path.home() / "Documents" / "ChatbotKajaLogs").resolve())
     openai_api_key_masked: str = ""
+    audio_guard_profile: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_AUDIO_GUARD_PROFILE))
 
     @property
     def openai_api_key(self) -> str:
@@ -272,6 +282,16 @@ class AppSettings:
         path = Path(self.log_dir).expanduser().resolve()
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def normalized_audio_guard_profile(self) -> dict[str, float]:
+        profile = dict(DEFAULT_AUDIO_GUARD_PROFILE)
+        for key, default in DEFAULT_AUDIO_GUARD_PROFILE.items():
+            try:
+                profile[key] = float(self.audio_guard_profile.get(key, default))
+            except Exception:
+                profile[key] = float(default)
+        profile["echo_similarity_drop"] = max(profile["echo_similarity_soft"] + 0.04, profile["echo_similarity_drop"])
+        return profile
 
     def validate_log_dir(self) -> Path:
         path = self.ensure_log_dir()
@@ -326,6 +346,10 @@ class AppSettings:
         settings.answer_language_mode = normalize_answer_language_mode(settings.answer_language_mode)
         settings.fixed_answer_language = normalize_fixed_language(settings.fixed_answer_language)
         settings.response_style = normalize_response_style(settings.response_style)
+        if not isinstance(settings.audio_guard_profile, dict):
+            settings.audio_guard_profile = dict(DEFAULT_AUDIO_GUARD_PROFILE)
+        else:
+            settings.audio_guard_profile = settings.normalized_audio_guard_profile()
         settings.ensure_log_dir()
         return settings
 

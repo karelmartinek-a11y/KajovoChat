@@ -1,14 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtWidgets import QApplication
 
 from kajovochat.widgets.head_widget import HeadWidget
-
-
-ASSETS_DIR = Path(__file__).resolve().parents[1] / "kajovochat" / "resources" / "assets"
-
 
 def _app() -> QApplication:
     app = QApplication.instance()
@@ -19,10 +13,11 @@ def _app() -> QApplication:
 
 def test_head_widget_accepts_lipsync_snapshot() -> None:
     _app()
-    widget = HeadWidget(str(ASSETS_DIR / "head_photo.png"))
+    widget = HeadWidget("ignored")
     widget.set_lipsync_snapshot(
         {
             "weights": {"closed": 0.1, "small": 0.1, "aa": 0.4, "ee": 0.2, "oo": 0.2},
+            "energy": 0.6,
         }
     )
     assert widget._mouth_energy > 0.0
@@ -31,7 +26,7 @@ def test_head_widget_accepts_lipsync_snapshot() -> None:
 
 def test_head_widget_error_reset_rect_exists_after_paint() -> None:
     app = _app()
-    widget = HeadWidget(str(ASSETS_DIR / "head_photo.png"))
+    widget = HeadWidget("ignored")
     widget.resize(640, 640)
     widget.set_state("error")
     widget.set_error_text("Test")
@@ -44,6 +39,15 @@ def test_head_widget_error_reset_rect_exists_after_paint() -> None:
 
 def test_head_widget_reports_render_backend() -> None:
     _app()
-    widget = HeadWidget(str(ASSETS_DIR / "head_photo.png"))
+    widget = HeadWidget("ignored")
     summary = widget.render_backend_summary()
-    assert "backend" in summary or "fallback-2d" in summary or "gpu-opengl" in summary
+    assert "backend=ekg-2d" == summary
+
+
+def test_head_widget_terminal_keeps_last_ten_rows() -> None:
+    _app()
+    widget = HeadWidget("ignored")
+    widget.set_terminal_text("\n".join(f"Řádek {index}" for index in range(14)))
+    assert len(widget._terminal_lines) == 10
+    assert widget._terminal_lines[0] == "Řádek 4"
+    assert widget._terminal_lines[-1] == "Řádek 13"

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from kajovochat.settings import (
     AppSettings,
+    DEFAULT_AUDIO_GUARD_PROFILE,
     RESPONSE_STYLE_CHOICES,
     build_system_prompt,
 )
@@ -100,3 +101,12 @@ def test_validate_log_dir_creates_writable_probe() -> None:
         settings = AppSettings(log_dir=str(temp_dir))
         resolved = settings.validate_log_dir()
         assert resolved == Path(temp_dir).resolve()
+
+
+def test_audio_guard_profile_is_normalized() -> None:
+    settings = AppSettings(audio_guard_profile={"echo_similarity_soft": 0.9, "echo_similarity_drop": 0.85})
+    profile = settings.normalized_audio_guard_profile()
+
+    assert profile["echo_similarity_soft"] == 0.9
+    assert profile["echo_similarity_drop"] >= profile["echo_similarity_soft"] + 0.04
+    assert profile["server_vad_threshold"] == DEFAULT_AUDIO_GUARD_PROFILE["server_vad_threshold"]
