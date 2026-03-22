@@ -70,3 +70,15 @@ Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. Te
 python -m compileall -q kajovochat app_gui.py
 pytest -q
 ```
+
+## Build pro macOS
+
+Pro vytvoření `.app` balíčku je v repu připravený PyInstaller build skript:
+
+```bash
+python3 tools/build_macos_app.py
+```
+
+Výstup najdeš v `dist/ChatbotKaja.app`.
+
+Build používá `app_gui.py` jako vstupní bod, protože je to bezpečnější top-level script pro PyInstaller než balení `kajovochat/__main__.py`.

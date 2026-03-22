@@ -24,7 +24,7 @@ def _smooth_exp(current: float, target: float, dt: float, attack: float, release
     return current + (target - current) * alpha
 
 
-@dataclass(slots=True)
+@dataclass
 class AudioFeatureFrame:
     loudness: float = 0.0
     rms: float = 0.0
@@ -54,7 +54,7 @@ class AudioFeatureFrame:
         }
 
 
-@dataclass(slots=True)
+@dataclass
 class AudioAnalyzer:
     config: LivingOrbConfig
     sample_rate: int = 24000

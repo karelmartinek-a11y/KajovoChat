@@ -101,7 +101,8 @@ class LipSyncEngine:
 
         with self._lock:
             now = time.perf_counter()
-            dt = max(0.0, min(0.05, now - self._last_tick))
+            chunk_dt = float(pcm.size) / max(1.0, float(samplerate))
+            dt = max(0.0, min(0.08, max(now - self._last_tick, chunk_dt)))
             self._last_tick = now
             self._last_audio_at = now
             for pose in _POSES:

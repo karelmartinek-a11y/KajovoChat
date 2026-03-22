@@ -24,7 +24,7 @@ def _dict_of_floats(value: Any) -> dict[str, float]:
     return {str(key): _float(item) for key, item in value.items()}
 
 
-@dataclass(slots=True)
+@dataclass
 class VisemeFrame:
     timestamp_s: float = 0.0
     cluster: str = "sil"
@@ -122,7 +122,7 @@ class VisemeFrame:
         }
 
 
-@dataclass(slots=True)
+@dataclass
 class BlinkFrame:
     timestamp_s: float = 0.0
     blink_amount: float = 0.0
@@ -144,7 +144,7 @@ class BlinkFrame:
         )
 
 
-@dataclass(slots=True)
+@dataclass
 class GazeFrame:
     timestamp_s: float = 0.0
     gaze_x: float = 0.0
@@ -165,7 +165,7 @@ class GazeFrame:
         )
 
 
-@dataclass(slots=True)
+@dataclass
 class HeadMotionFrame:
     timestamp_s: float = 0.0
     head_tx: float = 0.0
@@ -188,7 +188,7 @@ class HeadMotionFrame:
         )
 
 
-@dataclass(slots=True)
+@dataclass
 class PerformanceFrame:
     timestamp_s: float = 0.0
     state: str = "idle"

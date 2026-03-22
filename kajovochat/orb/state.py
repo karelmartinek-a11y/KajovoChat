@@ -10,7 +10,7 @@ def _ease_cubic(value: float) -> float:
     return value * value * (3.0 - 2.0 * value)
 
 
-@dataclass(slots=True)
+@dataclass
 class StateController:
     config: LivingOrbConfig
     current_state: str = "idle"

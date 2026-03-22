@@ -11,7 +11,7 @@ from PySide6.QtGui import QImage, QPainter, QTransform
 from .sphere_renderer import qimage_to_rgba_numpy
 
 
-@dataclass(slots=True)
+@dataclass
 class RigLayer:
     name: str
     role: str
@@ -28,7 +28,7 @@ class RigLayer:
     height: int | None = None
 
 
-@dataclass(slots=True)
+@dataclass
 class RigDefinition:
     meta: dict[str, Any]
     canvas: dict[str, Any]

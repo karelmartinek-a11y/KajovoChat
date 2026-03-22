@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from PySide6.QtGui import QOffscreenSurface, QOpenGLContext, QSurfaceFormat
 
 
-@dataclass(slots=True)
+@dataclass
 class OpenGLProbeResult:
     available: bool
     backend: str

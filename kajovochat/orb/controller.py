@@ -7,7 +7,7 @@ from .audio import AudioFeatureFrame
 from .config import LivingOrbConfig, OrbStateProfile
 
 
-@dataclass(slots=True)
+@dataclass
 class OrbFrameParameters:
     time: float
     radius: float

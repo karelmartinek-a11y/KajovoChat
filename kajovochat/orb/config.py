@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-@dataclass(slots=True)
+@dataclass
 class OrbStateProfile:
     core_intensity: float
     glow_intensity: float
@@ -20,7 +20,7 @@ class OrbStateProfile:
     radius_bias: float
 
 
-@dataclass(slots=True)
+@dataclass
 class LivingOrbConfig:
     core_radius: float = 0.23
     glow_intensity: float = 1.05
