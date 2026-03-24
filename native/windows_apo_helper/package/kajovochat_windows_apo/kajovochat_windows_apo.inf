@@ -1,0 +1,60 @@
+; KajovoChat Windows APO instalacni kostra
+; Tento soubor je template pro WDK/driver packaging.
+; Nejde o hotovy podepsany balicek. Pro nasazeni je nutne doplnit
+; realne CLSID, podpisy a pripadne konkretni device/endpoint binding.
+;
+; Registrace vychazi z ofiko Windows APO modelu: APO je COM DLL v procesu
+; a INF zapisuje CLSID do property store pres PKEY_FX_* / PKEY_MFX_*.
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = AudioProcessingObject
+ClassGuid   = {5989FCE8-9CD0-467D-8A6A-5419E31529D4}
+Provider    = %MfgName%
+CatalogFile  = kajovochat_windows_apo.cat
+DriverVer   = 03/23/2026,1.0.0.0
+
+[Manufacturer]
+%MfgName% = KajovoChat,NTamd64
+
+[KajovoChat.NTamd64]
+%KajovoApo.DeviceDesc% = KajovoApo_Install, Root\KajovoChatApo
+
+[KajovoApo_Install.NT]
+CopyFiles = KajovoApo.CopyFiles
+AddReg    = KajovoApo.AddReg
+
+[KajovoApo.CopyFiles]
+kajovochat_windows_apo.dll
+
+[KajovoApo.AddReg]
+; Mode effect registrace pro streaming.
+HKR,"FX\\0",%PKEY_FX_ModeEffectClsid%,,%KAJOVOCHAT_APO_CLSID%
+HKR,"FX\\0",%PKEY_MFX_ProcessingModes_Supported_For_Streaming%,0x00010000,%AUDIO_SIGNALPROCESSINGMODE_DEFAULT%,%AUDIO_SIGNALPROCESSINGMODE_COMMUNICATIONS%
+
+; Endpoint effect varianta je zde pripravena jako dalsi krok, pokud bude
+; treba registrovat APO jako EFX na konkretni endpoint.
+; HKR,"FX\\0",%PKEY_FX_EndpointEffectClsid%,,%KAJOVOCHAT_APO_CLSID%
+; HKR,"FX\\0",%PKEY_EFX_ProcessingModes_Supported_For_Streaming%,0x00010000,%AUDIO_SIGNALPROCESSINGMODE_DEFAULT%
+
+[DestinationDirs]
+DefaultDestDir = 12
+KajovoApo.CopyFiles = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+kajovochat_windows_apo.dll = 1
+
+[Strings]
+MfgName = "KajovoChat"
+KajovoApo.DeviceDesc = "KajovoChat Windows APO"
+DiskName = "KajovoChat Windows APO Installation Media"
+PKEY_FX_ModeEffectClsid = "{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},6"
+PKEY_MFX_ProcessingModes_Supported_For_Streaming = "{D3993A3F-99C2-4402-B5EC-A92A0367664B},6"
+PKEY_FX_EndpointEffectClsid = "{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},15"
+PKEY_EFX_ProcessingModes_Supported_For_Streaming = "{D3993A3F-99C2-4402-B5EC-A92A0367664B},7"
+AUDIO_SIGNALPROCESSINGMODE_DEFAULT = "{C18E2F7E-933D-4965-B7D1-1EEF228D2AF3}"
+AUDIO_SIGNALPROCESSINGMODE_COMMUNICATIONS = "{98951333-B9CD-48B1-A0A3-FF40682D73F7}"
+KAJOVOCHAT_APO_CLSID = "{97A08C5E-05D2-4F6D-B5D8-5A4D8F9A7E42}"

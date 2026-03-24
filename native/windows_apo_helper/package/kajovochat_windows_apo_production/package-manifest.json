@@ -1,0 +1,21 @@
+{
+    "generated_at":  "2026-03-24T12:06:54.4873348+01:00",
+    "profile":  "production",
+    "build_dir":  "C:\\GitHub\\KajovoChat\\native\\windows_apo_helper\\build\\bin\\Release",
+    "bundle_dir":  "C:\\GitHub\\KajovoChat\\native\\windows_apo_helper\\package\\kajovochat_windows_apo_production",
+    "files":  [
+                  {
+                      "name":  "kajovochat_windows_apo.dll",
+                      "sha256":  "7347904C3451B59877240A6710CC65C8C5809D5823B48FA9440A0107DD0D94B0"
+                  },
+                  {
+                      "name":  "kajovochat_windows_apo.inf",
+                      "sha256":  "1AA5BAE6CD5474E2F534823730D82495143B17F5E61CA1134264D670E545CC9D"
+                  },
+                  {
+                      "name":  "kajovochat_windows_apo.cat",
+                      "sha256":  "AA916E9471E43E80DE4F17473CD51B0F05DAF1598B622B9B7D76DDFC92DD4260"
+                  }
+              ],
+    "note":  "Tento balicek je pouze staging skeleton. Pred instalaci dopln podpis, WDK balicek a skutecnou registraci APO."
+}
