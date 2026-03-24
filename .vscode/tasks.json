@@ -1,0 +1,338 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Native AEC: Configure",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe\" -S native/windows_aec_helper -B native/windows_aec_helper/build"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native AEC: Build",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe\" --build native/windows_aec_helper/build --config Release"
+      ],
+      "dependsOn": [
+        "Native AEC: Configure"
+      ],
+      "group": "build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Native AEC: Test",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\ctest.exe\" --test-dir native/windows_aec_helper/build -C Release --output-on-failure"
+      ],
+      "dependsOn": [
+        "Native AEC: Build"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native AEC: Clean",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "if (Test-Path 'native/windows_aec_helper/build') { Remove-Item -Recurse -Force 'native/windows_aec_helper/build' }"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Configure",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe\" -S native/windows_apo_helper -B native/windows_apo_helper/build"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Build",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe\" --build native/windows_apo_helper/build --config Release"
+      ],
+      "dependsOn": [
+        "Native APO: Configure"
+      ],
+      "group": "build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Native APO: Test",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "& \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\ctest.exe\" --test-dir native/windows_apo_helper/build -C Release --output-on-failure"
+      ],
+      "dependsOn": [
+        "Native APO: Build"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Package",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/package_windows_apo.ps1",
+        "-Profile",
+        "dev"
+      ],
+      "dependsOn": [
+        "Native APO: Build"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Package Production",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/package_windows_apo.ps1",
+        "-Profile",
+        "production"
+      ],
+      "dependsOn": [
+        "Native APO: Build"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Validate Package",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/validate_windows_apo_package.ps1",
+        "-PackageDir",
+        "native/windows_apo_helper/package/kajovochat_windows_apo_dev"
+      ],
+      "dependsOn": [
+        "Native APO: Package"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Validate Production Package",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/validate_windows_apo_package.ps1",
+        "-PackageDir",
+        "native/windows_apo_helper/package/kajovochat_windows_apo_production"
+      ],
+      "dependsOn": [
+        "Native APO: Package Production"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Install Package (WhatIf)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/install_windows_apo_package.ps1",
+        "-PackageDir",
+        "native/windows_apo_helper/package/kajovochat_windows_apo_dev",
+        "-WhatIf"
+      ],
+      "dependsOn": [
+        "Native APO: Validate Package"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Install Production Package (WhatIf)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/install_windows_apo_package.ps1",
+        "-PackageDir",
+        "native/windows_apo_helper/package/kajovochat_windows_apo_production",
+        "-WhatIf"
+      ],
+      "dependsOn": [
+        "Native APO: Validate Production Package"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Find Installed Package",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/find_windows_apo_package.ps1"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Audit Prereqs",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/audit_windows_apo_prereqs.ps1",
+        "-PackageDir",
+        "native/windows_apo_helper/package/kajovochat_windows_apo_production"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Bootstrap Toolchain (WhatIf)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/bootstrap_windows_apo_toolchain.ps1"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Uninstall Package (WhatIf)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/uninstall_windows_apo_package.ps1",
+        "-PublishedName",
+        "oem0.inf",
+        "-WhatIf"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Preflight Release",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/preflight_windows_apo_release.ps1",
+        "-PackageDir",
+        "native/windows_apo_helper/package/kajovochat_windows_apo_production"
+      ],
+      "dependsOn": [
+        "Native APO: Validate Production Package"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: New Catalog (WhatIf)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/new_windows_apo_catalog.ps1",
+        "-PackageDir",
+        "native/windows_apo_helper/package/kajovochat_windows_apo_production",
+        "-WhatIf"
+      ],
+      "dependsOn": [
+        "Native APO: Preflight Release"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Native APO: Sign Package (WhatIf)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "native/windows_apo_helper/installer/sign_windows_apo_package.ps1",
+        "-PackageDir",
+        "native/windows_apo_helper/package/kajovochat_windows_apo_production",
+        "-CertificateThumbprint",
+        "0000000000000000000000000000000000000000",
+        "-WhatIf"
+      ],
+      "dependsOn": [
+        "Native APO: Preflight Release"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

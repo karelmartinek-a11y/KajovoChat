@@ -64,6 +64,8 @@ DEFAULT_AUDIO_GUARD_PROFILE = {
     "barge_in_output_ratio": 1.35,
 }
 
+DEFAULT_AUDIO_AEC_MODE = "windows_native_preferred"
+
 
 def _config_dir() -> Path:
     return Path(user_config_dir(APP_NAME, ORG_NAME))
@@ -245,6 +247,34 @@ def normalize_response_style(value: str) -> str:
     return mapping.get(normalized, "normální")
 
 
+def normalize_audio_aec_mode(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"windows_native_preferred", "windows_native", "native", "native_preferred"}:
+        return "windows_native_preferred"
+    if normalized in {"webrtc_preferred", "hybrid"}:
+        return normalized
+    if normalized in {"webrtc", "webrtc_first", "webrtc-first"}:
+        return "webrtc_preferred"
+    if normalized in {"custom_only", "custom", "legacy"}:
+        return "custom_only"
+    return DEFAULT_AUDIO_AEC_MODE
+
+
+def _promote_audio_aec_mode_for_installed_native_backend(current_mode: str) -> str:
+    normalized = normalize_audio_aec_mode(current_mode)
+    if normalized != "webrtc_preferred":
+        return normalized
+    try:
+        from .services.windows_native_aec import probe_windows_native_aec
+
+        probe = probe_windows_native_aec()
+        if probe.available and probe.installed_driver:
+            return "windows_native_preferred"
+    except Exception:
+        pass
+    return normalized
+
+
 def _migrate_response_style(data: dict) -> str:
     if "response_style" in data and data["response_style"] in {code for code, _ in RESPONSE_STYLE_CHOICES}:
         return normalize_response_style(str(data["response_style"]))
@@ -268,6 +298,11 @@ class AppSettings:
     log_dir: str = str((Path.home() / "Documents" / "ChatbotKajaLogs").resolve())
     openai_api_key_masked: str = ""
     audio_guard_profile: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_AUDIO_GUARD_PROFILE))
+    audio_guard_calibration: dict[str, object] = field(default_factory=dict)
+    audio_aec_mode: str = DEFAULT_AUDIO_AEC_MODE
+
+    def __post_init__(self) -> None:
+        self.audio_aec_mode = normalize_audio_aec_mode(self.audio_aec_mode)
 
     @property
     def openai_api_key(self) -> str:
@@ -346,11 +381,20 @@ class AppSettings:
         settings.answer_language_mode = normalize_answer_language_mode(settings.answer_language_mode)
         settings.fixed_answer_language = normalize_fixed_language(settings.fixed_answer_language)
         settings.response_style = normalize_response_style(settings.response_style)
+        original_aec_mode = settings.audio_aec_mode
+        settings.audio_aec_mode = _promote_audio_aec_mode_for_installed_native_backend(settings.audio_aec_mode)
         if not isinstance(settings.audio_guard_profile, dict):
             settings.audio_guard_profile = dict(DEFAULT_AUDIO_GUARD_PROFILE)
         else:
             settings.audio_guard_profile = settings.normalized_audio_guard_profile()
+        if not isinstance(settings.audio_guard_calibration, dict):
+            settings.audio_guard_calibration = {}
         settings.ensure_log_dir()
+        if settings.audio_aec_mode != normalize_audio_aec_mode(original_aec_mode):
+            try:
+                settings.save()
+            except Exception:
+                pass
         return settings
 
 

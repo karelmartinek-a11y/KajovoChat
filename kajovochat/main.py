@@ -30,17 +30,21 @@ from .settings import (
     AppSettings,
     DEFAULT_AUDIO_GUARD_PROFILE,
     build_system_prompt,
+    normalize_audio_aec_mode,
 )
 from .dialogs.settings_dialog import SettingsDialog
 from .services.audio_service import (
+    AdaptiveEchoCanceller,
     AudioPlayer,
     RealtimeMicStream,
+    build_device_fingerprint,
     pick_audio_device,
     format_device_help,
     list_audio_devices,
     calibrate_audio_devices_advanced,
     suppress_echo_from_pcm16,
 )
+from .services.windows_native_aec import probe_windows_native_aec
 from .services.realtime_service import RealtimeConfig, RealtimeService
 from .services.log_service import RealtimeLogWriter
 from .services.app_logging import install_app_logging
@@ -153,6 +157,10 @@ def _should_drop_mic_chunk(
     input_level: float,
     output_level: float,
     profile: Optional[dict[str, float]] = None,
+    residual_level: Optional[float] = None,
+    voice_likelihood: float = 0.0,
+    double_talk: bool = False,
+    aec_quality: float = 0.0,
 ) -> tuple[bool, str]:
     active_profile = dict(DEFAULT_AUDIO_GUARD_PROFILE)
     if profile:
@@ -161,6 +169,7 @@ def _should_drop_mic_chunk(
     echo_similarity_soft = float(active_profile["echo_similarity_soft"])
     barge_in_min_input_level = float(active_profile["barge_in_min_input_level"])
     barge_in_output_ratio = float(active_profile["barge_in_output_ratio"])
+    residual = float(input_level if residual_level is None else residual_level)
 
     if mode != "handsfree" or not guard_active:
         return False, ""
@@ -169,11 +178,15 @@ def _should_drop_mic_chunk(
         input_level >= barge_in_min_input_level
         and input_level >= max(barge_in_min_input_level, output_level * barge_in_output_ratio)
     )
-    if similarity >= echo_similarity_drop and not strong_user:
+    if double_talk and (voice_likelihood >= 0.42 or strong_user):
+        return False, ""
+    if similarity >= echo_similarity_drop and not strong_user and residual <= max(0.08, output_level * 1.05):
         return True, "echo_similarity"
-    if playback_active and similarity >= echo_similarity_soft and input_level <= max(0.045, output_level * 1.10):
-        return True, "echo_during_playback"
-    if playback_active and output_level >= 0.06 and input_level <= 0.025:
+    if playback_active and aec_quality < 0.04 and similarity >= max(0.66, echo_similarity_soft) and not strong_user and voice_likelihood < 0.5:
+        return True, "echo_similarity_fallback"
+    if playback_active and similarity >= echo_similarity_soft and residual <= max(0.045, output_level * (0.98 if aec_quality > 0.2 else 1.08)):
+        return True, "echo_residual"
+    if playback_active and aec_quality < 0.05 and output_level >= 0.06 and residual <= 0.022 and voice_likelihood < 0.26:
         return True, "quiet_bleed"
     return False, ""
 
@@ -248,6 +261,13 @@ def run_audio_guard_selftest() -> dict[str, object]:
                     "ok": auto_ok,
                     "detail": "; ".join(calibration.notes),
                     "profile": calibration.recommended_profile,
+                    "calibration": {
+                        "latency_samples": getattr(calibration, "latency_samples", 0),
+                        "preferred_frame_size": getattr(calibration, "preferred_frame_size", 480),
+                        "filter_length": getattr(calibration, "filter_length", 256),
+                        "audio_mode": getattr(calibration, "audio_mode", "notebook_builtin"),
+                        "device_fingerprint": getattr(calibration, "device_fingerprint", "unknown"),
+                    },
                     "non_blocking": strong_playback_capture,
                 }
             )
@@ -275,6 +295,7 @@ def run_audio_guard_selftest() -> dict[str, object]:
         "ok": overall_ok,
         "checks": checks,
         "profile": next((dict(item.get("profile", {})) for item in reversed(checks) if item.get("profile")), dict(profile)),
+        "calibration": next((dict(item.get("calibration", {})) for item in reversed(checks) if item.get("calibration")), {}),
     }
 
 
@@ -300,11 +321,14 @@ class ConversationWorker(QObject):
         super().__init__()
         self.settings = settings
         self._guard_profile = _audio_guard_profile(settings)
+        self._guard_calibration = dict(settings.audio_guard_calibration or {})
         self._guard_telemetry = GuardTelemetry()
         self._guard_adaptor = GuardAdaptor()
         self._guard_last_adapt_at = 0.0
         self._guard_learning_until = 0.0
         self._guard_aec_aware = False
+        self._aec_mode = normalize_audio_aec_mode(self.settings.audio_aec_mode)
+        self._native_aec_probe = probe_windows_native_aec()
         self._session_log_dir: Optional[Path] = None
         self._session_name: str = ""
         self._input_device_name = "default"
@@ -316,6 +340,7 @@ class ConversationWorker(QObject):
         self._captions = ""
         self._logger: Optional[RealtimeLogWriter] = None
         self._player: Optional[AudioPlayer] = None
+        self._aec = AdaptiveEchoCanceller(samplerate=24000)
         self._resolved_input_device: Optional[int] = None
         self._resolved_output_device: Optional[int] = None
 
@@ -342,8 +367,18 @@ class ConversationWorker(QObject):
         self._echo_drop_count = 0
         self._barge_in_chunk_count = 0
         self._last_echo_stat_log_at = 0.0
+        self._last_aec_diag_log_at = 0.0
+        self._last_aec_success_log_at = 0.0
         self._last_echo_drop_reported = 0
         self._last_barge_in_reported = 0
+        self._aec_diag_stats = self._empty_aec_diag_stats()
+        self._playback_reference_armed = False
+        self._reference_warmup_until = 0.0
+        self._cached_echo_reference: bytes = b""
+        self._cached_reference_at = 0.0
+        self._latency_candidate_samples = 0
+        self._latency_candidate_hits = 0
+        self._latency_last_committed = int(self._guard_calibration.get("latency_samples", 0) or 0)
 
         # Level signals are throttled to avoid saturating the Qt event loop.
         self._last_in_level: float = 0.0
@@ -370,10 +405,84 @@ class ConversationWorker(QObject):
             "audio_mode": self._audio_mode,
             "aec_aware": self._guard_aec_aware,
             "learning_mode": time.monotonic() < self._guard_learning_until,
+            "native_aec_available": self._native_aec_probe.available,
+            "native_aec_reason": self._native_aec_probe.reason,
+            "calibration": dict(self._guard_calibration),
             "input_device_name": self._input_device_name,
             "output_device_name": self._output_device_name,
         }
         self.guard_debug_updated.emit(payload)
+
+    @staticmethod
+    def _empty_aec_diag_stats() -> dict[str, float]:
+        return {
+            "samples": 0.0,
+            "double_talk": 0.0,
+            "low_quality": 0.0,
+            "reference_miss": 0.0,
+            "reference_ready": 0.0,
+            "aligned": 0.0,
+            "strong_aligned": 0.0,
+            "residual_sum": 0.0,
+            "quality_sum": 0.0,
+            "aligned_residual_sum": 0.0,
+            "aligned_quality_sum": 0.0,
+            "delay_error_sum": 0.0,
+            "max_delay_error": 0.0,
+        }
+
+    def _record_aec_diag_sample(
+        self,
+        *,
+        residual_level: float,
+        aec_quality: float,
+        double_talk: bool,
+        delay_samples: int,
+        similarity: float,
+        reference_miss: bool,
+    ) -> None:
+        stats = self._aec_diag_stats
+        stats["samples"] += 1.0
+        stats["residual_sum"] += float(residual_level)
+        stats["quality_sum"] += float(aec_quality)
+        if double_talk:
+            stats["double_talk"] += 1.0
+        if aec_quality < 0.18:
+            stats["low_quality"] += 1.0
+        if reference_miss:
+            stats["reference_miss"] += 1.0
+        else:
+            stats["reference_ready"] += 1.0
+        if similarity >= 0.2:
+            stats["aligned"] += 1.0
+            stats["aligned_residual_sum"] += float(residual_level)
+            stats["aligned_quality_sum"] += float(aec_quality)
+        if similarity >= 0.5:
+            stats["strong_aligned"] += 1.0
+        calibration_latency = int(self._guard_calibration.get("latency_samples", 0) or 0)
+        delay_error = abs(int(delay_samples) - calibration_latency) if calibration_latency > 0 and delay_samples > 0 else 0
+        stats["delay_error_sum"] += float(delay_error)
+        stats["max_delay_error"] = max(float(stats["max_delay_error"]), float(delay_error))
+
+    def _build_aec_summary(self) -> dict[str, float]:
+        stats = dict(self._aec_diag_stats)
+        samples = max(1.0, float(stats.get("samples", 0.0) or 0.0))
+        aligned = max(1.0, float(stats.get("aligned", 0.0) or 0.0))
+        return {
+            "samples": int(stats.get("samples", 0.0) or 0.0),
+            "avg_residual": float(stats.get("residual_sum", 0.0) or 0.0) / samples,
+            "avg_quality": float(stats.get("quality_sum", 0.0) or 0.0) / samples,
+            "double_talk_ratio": float(stats.get("double_talk", 0.0) or 0.0) / samples,
+            "low_quality_ratio": float(stats.get("low_quality", 0.0) or 0.0) / samples,
+            "reference_miss_ratio": float(stats.get("reference_miss", 0.0) or 0.0) / samples,
+            "reference_ready_ratio": float(stats.get("reference_ready", 0.0) or 0.0) / samples,
+            "aligned_ratio": float(stats.get("aligned", 0.0) or 0.0) / samples,
+            "strong_alignment_ratio": float(stats.get("strong_aligned", 0.0) or 0.0) / samples,
+            "avg_quality_when_aligned": float(stats.get("aligned_quality_sum", 0.0) or 0.0) / aligned,
+            "avg_residual_when_aligned": float(stats.get("aligned_residual_sum", 0.0) or 0.0) / aligned,
+            "avg_delay_error": float(stats.get("delay_error_sum", 0.0) or 0.0) / samples,
+            "max_delay_error": float(stats.get("max_delay_error", 0.0) or 0.0),
+        }
 
     def _set_state(self, s: str) -> None:
         normalized = (s or _STATE_IDLE).strip().lower()
@@ -401,10 +510,169 @@ class ConversationWorker(QObject):
         except Exception:
             return 0.0
 
+    def _preferred_frame_size(self) -> int:
+        value = int(self._guard_calibration.get("preferred_frame_size", 480) or 480)
+        return max(240, min(1920, value))
+
+    def _current_device_fingerprint(self) -> str:
+        return build_device_fingerprint(self._resolved_input_device, self._resolved_output_device, 24000)
+
+    def _configure_aec_from_calibration(self) -> None:
+        calibration = self._guard_calibration or {}
+        filter_length = int(calibration.get("filter_length", self._aec.filter_length) or self._aec.filter_length)
+        latency = int(calibration.get("latency_samples", self._aec.last_shift) or self._aec.last_shift)
+        self._aec.configure(
+            filter_length=filter_length,
+            max_shift_samples=max(960, latency + max(240, filter_length // 2)),
+        )
+        if latency > 0:
+            self._aec._last_shift = latency
+            self._latency_last_committed = latency
+
+    def _consider_runtime_latency_update(
+        self,
+        *,
+        delay_samples: int,
+        similarity: float,
+        aec_quality: float,
+        improvement_ratio: float,
+        backend: str,
+        double_talk: bool,
+        prefer_webrtc: bool = False,
+    ) -> None:
+        if delay_samples <= 0 or double_talk:
+            self._latency_candidate_hits = 0
+            return
+        committed = int(self._guard_calibration.get("latency_samples", self._latency_last_committed) or self._latency_last_committed or 0)
+        if committed <= 0:
+            committed = int(delay_samples)
+        webrtc_close_window = max(96, self._aec.filter_length // (4 if prefer_webrtc else 5))
+        stable_candidate = bool(
+            (
+                backend == "webrtc"
+                and similarity >= (0.42 if prefer_webrtc else 0.5)
+                and improvement_ratio >= (0.08 if prefer_webrtc else 0.12)
+                and aec_quality >= (0.04 if prefer_webrtc else 0.05)
+                and abs(int(delay_samples) - committed) <= webrtc_close_window
+            )
+            or (similarity >= 0.55 and aec_quality >= 0.08)
+        )
+        if not stable_candidate:
+            self._latency_candidate_hits = max(0, self._latency_candidate_hits - 1)
+            return
+
+        max_step = max(160, self._aec.filter_length // 2)
+        if backend == "webrtc" and committed > 0 and abs(int(delay_samples) - committed) > max_step + 96:
+            self._latency_candidate_hits = max(0, self._latency_candidate_hits - 1)
+            return
+        if abs(int(delay_samples) - committed) > max_step:
+            target = committed + max_step if delay_samples > committed else committed - max_step
+        else:
+            target = int(delay_samples)
+
+        if self._latency_candidate_samples <= 0 or abs(int(target) - int(self._latency_candidate_samples)) > 48:
+            self._latency_candidate_samples = int(target)
+            self._latency_candidate_hits = 1
+            return
+
+        self._latency_candidate_samples = int(round((self._latency_candidate_samples * 0.6) + (int(target) * 0.4)))
+        self._latency_candidate_hits += 1
+        required_hits = 3 if (backend == "webrtc" and prefer_webrtc) else (4 if backend == "webrtc" else 3)
+        if self._latency_candidate_hits < required_hits:
+            return
+
+        new_latency = int(self._latency_candidate_samples)
+        self._guard_calibration["latency_samples"] = new_latency
+        self._latency_last_committed = new_latency
+        self._latency_candidate_hits = 0
+
+    def _reference_needed_samples(self, chunk_bytes: int) -> int:
+        return max(int(chunk_bytes) // 2 + max(96, self._aec.filter_length // 6), 640)
+
+    def _is_reference_ready(
+        self,
+        *,
+        now_monotonic: float,
+        reference_needed: int,
+        available_samples: int,
+        played_samples: int,
+        callback_age_ms: int,
+    ) -> bool:
+        if not self._playback_reference_armed:
+            return False
+        enough_headroom = available_samples >= reference_needed + max(240, reference_needed // 4)
+        warmup_done = bool(
+            now_monotonic >= self._reference_warmup_until
+            or played_samples >= max(240, reference_needed // 4)
+            or enough_headroom
+        )
+        return bool(
+            warmup_done
+            and available_samples >= reference_needed
+            and (callback_age_ms >= 0 or played_samples >= max(240, reference_needed // 4))
+        )
+
+    def _can_use_cached_reference(self, *, now_monotonic: float, reference_needed: int, cached_samples: int) -> bool:
+        if cached_samples < max(448, reference_needed - 448):
+            return False
+        return bool((now_monotonic - self._cached_reference_at) <= 0.5)
+
     def _ensure_player(self) -> None:
         if self._player is not None:
             return
-        self._player = AudioPlayer(samplerate=24000, device=self._resolved_output_device)
+        self._player = AudioPlayer(
+            samplerate=24000,
+            device=self._resolved_output_device,
+            blocksize=self._preferred_frame_size(),
+        )
+
+    def _device_calibration_matches(self) -> bool:
+        calibration = self._guard_calibration or {}
+        fingerprint = str(calibration.get("device_fingerprint", "")).strip().lower()
+        if fingerprint and fingerprint != "unknown":
+            return fingerprint == self._current_device_fingerprint().strip().lower()
+        input_name = str(calibration.get("input_device_name", "")).strip().lower()
+        output_name = str(calibration.get("output_device_name", "")).strip().lower()
+        if not input_name or not output_name:
+            return False
+        return input_name == self._input_device_name.strip().lower() and output_name == self._output_device_name.strip().lower()
+
+    def _apply_device_class_policy(self) -> None:
+        profile = dict(self._guard_profile)
+        if self._audio_mode in {"wired_headset", "bluetooth_headset", "external_headphones"}:
+            profile["echo_similarity_soft"] = max(0.54, profile["echo_similarity_soft"] - 0.05)
+            profile["echo_similarity_drop"] = max(profile["echo_similarity_soft"] + 0.04, profile["echo_similarity_drop"] - 0.06)
+            profile["playback_activity_level"] = max(0.02, profile["playback_activity_level"] * 0.82)
+        elif self._audio_mode in {"external_speakers", "notebook_builtin"}:
+            profile["server_vad_threshold"] = min(0.9, profile["server_vad_threshold"] + 0.01)
+            profile["barge_in_output_ratio"] = min(1.9, profile["barge_in_output_ratio"] + 0.06)
+        self._guard_profile = profile
+
+    def _apply_aec_mode_policy(self) -> None:
+        profile = dict(self._guard_profile)
+        if self._aec_mode == "webrtc_preferred":
+            profile["echo_similarity_soft"] = max(0.58, profile["echo_similarity_soft"] - 0.03)
+            profile["echo_similarity_drop"] = max(profile["echo_similarity_soft"] + 0.04, profile["echo_similarity_drop"] - 0.025)
+            profile["playback_activity_level"] = max(0.025, profile["playback_activity_level"] * 0.92)
+            profile["barge_in_output_ratio"] = max(1.18, profile["barge_in_output_ratio"] * 0.97)
+        elif self._aec_mode == "custom_only":
+            profile["echo_similarity_soft"] = min(0.76, profile["echo_similarity_soft"] + 0.02)
+            profile["echo_similarity_drop"] = max(profile["echo_similarity_soft"] + 0.04, profile["echo_similarity_drop"] + 0.01)
+            profile["playback_activity_level"] = min(0.08, profile["playback_activity_level"] * 1.03)
+        self._guard_profile = profile
+
+    def _apply_saved_calibration(self) -> None:
+        if not self._device_calibration_matches():
+            self._apply_device_class_policy()
+            self._apply_aec_mode_policy()
+            return
+        saved_profile = self._guard_calibration.get("profile")
+        if isinstance(saved_profile, dict) and saved_profile:
+            merged = dict(self.settings.normalized_audio_guard_profile())
+            merged.update({key: float(value) for key, value in saved_profile.items() if key in DEFAULT_AUDIO_GUARD_PROFILE})
+            self._guard_profile = merged
+        self._configure_aec_from_calibration()
+        self._apply_aec_mode_policy()
 
     def _resolve_audio_devices(self) -> None:
         """Pick stable defaults for laptop mic + speakers.
@@ -428,9 +696,15 @@ class ConversationWorker(QObject):
             out_name = "(neznámé)"
         self._input_device_name = str(in_name)
         self._output_device_name = str(out_name)
+        combined_names = f"{self._input_device_name} {self._output_device_name}".lower()
         self._audio_mode = "notebook_builtin"
-        if any(token in self._output_device_name.lower() for token in ("headphone", "headset", "bluetooth", "airpods")):
-            self._audio_mode = "external_headphones"
+        if any(token in combined_names for token in ("bluetooth", "airpods", "buds", "hands-free")):
+            self._audio_mode = "bluetooth_headset"
+        elif any(token in combined_names for token in ("headphone", "headphones", "headset", "earbuds")):
+            self._audio_mode = "wired_headset"
+        elif any(token in combined_names for token in ("speaker", "speakers", "monitor", "hdmi", "display audio", "dock")) and not any(token in combined_names for token in ("built-in", "builtin", "internal", "laptop", "notebook")):
+            self._audio_mode = "external_speakers"
+        self._apply_saved_calibration()
         self._append_caption(f"Mic: {in_dev if in_dev is not None else 'Default'} – {in_name}")
         self._append_caption(f"Spk: {out_dev if out_dev is not None else 'Default'} – {out_name}")
 
@@ -453,6 +727,27 @@ class ConversationWorker(QObject):
             return
         payload = {"type": record_type}
         payload.update(extra)
+        if record_type == "aec_diag" and "text_line" not in payload:
+            payload["text_line"] = (
+                "AEC"
+                f" sim={float(payload.get('similarity', 0.0) or 0.0):.3f}"
+                f" residual={float(payload.get('residual_level', 0.0) or 0.0):.4f}"
+                f" q={float(payload.get('aec_quality', 0.0) or 0.0):.3f}"
+                f" pred={float(payload.get('predicted_level', 0.0) or 0.0):.4f}"
+                f" improve={float(payload.get('improvement_ratio', 0.0) or 0.0):.3f}"
+                f" backend={str(payload.get('backend', 'custom') or 'custom')}"
+                f" sel={str(payload.get('selection_reason', 'custom_fallback') or 'custom_fallback')}"
+                f" ws={'on' if bool(payload.get('webrtc_success')) else 'off'}"
+                f" native={'on' if bool(payload.get('native_selected')) else 'off'}"
+                f" natry={'on' if bool(payload.get('native_attempted')) else 'off'}"
+                f" dt={'on' if bool(payload.get('double_talk')) else 'off'}"
+                f" voice={float(payload.get('voice_likelihood', 0.0) or 0.0):.3f}"
+                f" delay={int(payload.get('delay_samples', 0) or 0)}"
+                f" calib={int(payload.get('calibration_latency', 0) or 0)}"
+                f" ref={int(payload.get('reference_available', 0) or 0)}"
+                f" age_ms={int(payload.get('reference_callback_age_ms', -1) or -1)}"
+                f" miss={'on' if bool(payload.get('reference_miss')) else 'off'}"
+            )
         self._logger.append(payload)
         if self._logger.last_error:
             self._append_caption(f"Logování: {self._logger.last_error}")
@@ -485,15 +780,22 @@ class ConversationWorker(QObject):
         self._echo_drop_count = 0
         self._barge_in_chunk_count = 0
         self._last_echo_stat_log_at = 0.0
+        self._last_aec_diag_log_at = 0.0
+        self._last_aec_success_log_at = 0.0
         self._last_echo_drop_reported = 0
         self._last_barge_in_reported = 0
+        self._aec_diag_stats = self._empty_aec_diag_stats()
+        self._cached_echo_reference = b""
+        self._cached_reference_at = 0.0
         self._guard_telemetry = GuardTelemetry()
+        self._aec.reset()
         self._guard_learning_until = time.monotonic() + 30.0
         log_dir = self.settings.validate_log_dir()
         session_name = datetime.now().strftime("kajovochat_%Y%m%d_%H%M%S")
         self._logger = RealtimeLogWriter(log_dir=log_dir, session_name=session_name)
         self._session_log_dir = log_dir
         self._session_name = session_name
+        self._append_caption(f"Log: {str(self._logger.jsonl_path)}")
 
         self._log_event(
             "session_start",
@@ -503,6 +805,7 @@ class ConversationWorker(QObject):
                 "answer_language_mode": self.settings.answer_language_mode,
                 "fixed_answer_language": self.settings.fixed_answer_language,
                 "response_style": self.settings.response_style,
+                "audio_aec_mode": self._aec_mode,
                 "tts_voice": _TTS_VOICE,
                 "tts_speed": _TTS_SPEED,
                 "audio": {
@@ -511,6 +814,7 @@ class ConversationWorker(QObject):
                     "input_device_name": self._input_device_name,
                     "output_device_name": self._output_device_name,
                     "audio_mode": self._audio_mode,
+                    "calibration": dict(self._guard_calibration),
                 },
             },
         )
@@ -522,18 +826,37 @@ class ConversationWorker(QObject):
         if not self._logger:
             return
         telemetry = self._guard_telemetry.snapshot(window_s=60.0)
+        aec_summary = self._build_aec_summary()
         self._log_event(
             "session_end_guard",
             profile=self._guard_profile,
             telemetry=telemetry,
             guard_state=self._guard_adaptor.state,
             aec_aware=self._guard_aec_aware,
+            aec_summary=aec_summary,
         )
         self._log_event("session_end", dropped_records=self._logger.dropped_records, last_error=self._logger.last_error)
+        if int(aec_summary.get("samples", 0) or 0) > 0:
+            self._log_event(
+                "aec_summary",
+                **{
+                    key: (round(float(value), 4) if isinstance(value, float) else value)
+                    for key, value in aec_summary.items()
+                },
+            )
+            self._append_caption(
+                "AEC summary: "
+                f"samples={int(aec_summary['samples'])} "
+                f"q={float(aec_summary['avg_quality']):.3f} "
+                f"residual={float(aec_summary['avg_residual']):.4f} "
+                f"dt={float(aec_summary['double_talk_ratio']):.3f} "
+                f"delay_err={float(aec_summary['avg_delay_error']):.1f}"
+            )
         try:
             self.settings.audio_guard_profile = self.settings.normalized_audio_guard_profile() | {
                 key: float(value) for key, value in self._guard_profile.items() if key in DEFAULT_AUDIO_GUARD_PROFILE
             }
+            self.settings.audio_guard_calibration = dict(self._guard_calibration)
             self.settings.save()
         except Exception:
             pass
@@ -864,7 +1187,13 @@ class ConversationWorker(QObject):
                         or self._ui_state == _STATE_SPEAKING
                     )
                     if is_playing_out:
+                        if not self._playback_reference_armed:
+                            self._playback_reference_armed = True
+                            self._reference_warmup_until = now_monotonic + 0.03
                         self._mic_suppressed_until = max(self._mic_suppressed_until, now_monotonic + _ECHO_TRAILING_HOLD_S)
+                    else:
+                        self._playback_reference_armed = False
+                        self._reference_warmup_until = 0.0
                 guard_active = (
                     self._mode == "handsfree"
                     and (is_playing_out or now_monotonic < self._mic_suppressed_until)
@@ -875,29 +1204,191 @@ class ConversationWorker(QObject):
                     # Drain a few chunks per tick to reduce backlog.
                     for _ in range(6):
                         try:
-                            chunk = self._mic.queue.get_nowait()
+                            chunk_item = self._mic.queue.get_nowait()
                         except queue.Empty:
                             break
+                        mic_captured_at_mono_ns = 0
+                        if hasattr(chunk_item, "pcm_bytes"):
+                            chunk = bytes(chunk_item.pcm_bytes)
+                            mic_captured_at_mono_ns = int(getattr(chunk_item, "captured_at_mono_ns", 0) or 0)
+                        else:
+                            chunk = chunk_item
                         if chunk:
                             processed_chunk = chunk
+                            aec_result: dict[str, object] = {}
                             similarity = 0.0
+                            residual_level = self._pcm16_level(chunk)
+                            aec_quality = 0.0
+                            double_talk = False
+                            raw_voice_likelihood = 0.0
+                            predicted_level = 0.0
+                            improvement_ratio = 0.0
+                            aec_backend = "custom"
+                            webrtc_success = False
+                            reference_miss = False
                             if guard_active and self._player is not None:
                                 try:
-                                    reference = self._player.get_echo_reference(max_samples=max(4096, len(chunk) // 2 + 960))
-                                except Exception:
-                                    reference = b""
-                                try:
-                                    processed_chunk, similarity = suppress_echo_from_pcm16(
-                                        chunk,
-                                        reference,
-                                        max_shift_samples=960,
+                                    previous_calibration_latency = int(self._guard_calibration.get("latency_samples", 0) or 0)
+                                    calibration_latency = previous_calibration_latency
+                                    reference = self._player.get_echo_reference_for_capture(
+                                        max_samples=max(8192, len(chunk) // 2 + 1920),
+                                        captured_at_mono_ns=mic_captured_at_mono_ns or None,
                                     )
+                                    reference_stats = self._player.get_echo_reference_stats()
                                 except Exception:
-                                    processed_chunk = chunk
-                                    similarity = 0.0
+                                    previous_calibration_latency = 0
+                                    calibration_latency = 0
+                                    reference = b""
+                                    reference_stats = {"available_samples": 0, "total_samples": 0, "played_samples": 0, "callback_age_ms": -1}
+                                reference_needed = self._reference_needed_samples(len(chunk))
+                                callback_age_ms = int(reference_stats.get("callback_age_ms", -1) or -1)
+                                played_samples = int(reference_stats.get("played_samples", 0) or 0)
+                                available_samples = int(reference_stats.get("available_samples", 0) or 0)
+                                reference_ready = self._is_reference_ready(
+                                    now_monotonic=time.monotonic(),
+                                    reference_needed=reference_needed,
+                                    available_samples=available_samples,
+                                    played_samples=played_samples,
+                                    callback_age_ms=callback_age_ms,
+                                )
+                                if not reference_ready and self._cached_echo_reference:
+                                    cached_samples = len(self._cached_echo_reference) // 2
+                                    if self._can_use_cached_reference(
+                                        now_monotonic=time.monotonic(),
+                                        reference_needed=reference_needed,
+                                        cached_samples=cached_samples,
+                                    ):
+                                        reference = np.frombuffer(self._cached_echo_reference, dtype=np.int16).copy()
+                                        reference_ready = True
+                                        available_samples = cached_samples
+                                        reference_stats = dict(reference_stats)
+                                        reference_stats["available_samples"] = cached_samples
+                                        reference_stats["callback_age_ms"] = max(0, callback_age_ms)
+                                elif (
+                                    not reference_ready
+                                    and available_samples <= 0
+                                    and self._cached_echo_reference
+                                    and played_samples > 0
+                                    and (time.monotonic() - self._cached_reference_at) <= 0.35
+                                ):
+                                    cached_samples = len(self._cached_echo_reference) // 2
+                                    if cached_samples >= max(640, len(chunk) // 2):
+                                        reference = np.frombuffer(self._cached_echo_reference, dtype=np.int16).copy()
+                                        reference_ready = True
+                                        available_samples = cached_samples
+                                        reference_stats = dict(reference_stats)
+                                        reference_stats["available_samples"] = cached_samples
+                                        reference_stats["callback_age_ms"] = max(0, callback_age_ms)
+                                reference_miss = not reference_ready
+                                if reference_ready:
+                                    try:
+                                        self._cached_echo_reference = np.asarray(reference, dtype=np.int16).astype(np.int16, copy=False).tobytes()
+                                        self._cached_reference_at = time.monotonic()
+                                    except Exception:
+                                        pass
+                                    try:
+                                        aec_result = self._aec.process(
+                                            chunk,
+                                            reference,
+                                            max_shift_samples=max(960, calibration_latency + max(240, self._aec.filter_length // 2)),
+                                            expected_shift=calibration_latency or None,
+                                            aec_mode=self._aec_mode,
+                                        )
+                                        processed_chunk = bytes(aec_result.get("pcm", chunk))
+                                        similarity = float(aec_result.get("similarity", 0.0) or 0.0)
+                                        residual_level = float(aec_result.get("residual_level", self._pcm16_level(processed_chunk)) or 0.0)
+                                        aec_quality = float(aec_result.get("aec_quality", 0.0) or 0.0)
+                                        double_talk = bool(aec_result.get("double_talk", False))
+                                        raw_voice_likelihood = float(aec_result.get("voice_likelihood", 0.0) or 0.0)
+                                        predicted_level = float(aec_result.get("predicted_level", 0.0) or 0.0)
+                                        improvement_ratio = float(aec_result.get("improvement_ratio", 0.0) or 0.0)
+                                        aec_backend = str(aec_result.get("backend", "custom") or "custom")
+                                        webrtc_success = bool(aec_result.get("webrtc_success", False))
+                                        native_attempted = bool(aec_result.get("native_attempted", False))
+                                        native_selected = bool(aec_result.get("native_selected", False))
+                                        selection_reason = str(aec_result.get("selection_reason", "custom_fallback") or "custom_fallback")
+                                        delay_samples = int(aec_result.get("delay_samples", 0) or 0)
+                                        self._record_aec_diag_sample(
+                                            residual_level=residual_level,
+                                            aec_quality=aec_quality,
+                                            double_talk=double_talk,
+                                            delay_samples=delay_samples,
+                                            similarity=similarity,
+                                            reference_miss=False,
+                                        )
+                                        can_refresh_latency = bool(
+                                            delay_samples > 0
+                                            and (
+                                                (similarity >= 0.55 and aec_quality >= 0.08)
+                                                or (aec_backend == "webrtc" and similarity >= 0.4 and improvement_ratio >= 0.05)
+                                            )
+                                            and not double_talk
+                                            and reference_stats.get("available_samples", 0) >= max(len(chunk) // 2 + 256, 1024)
+                                        )
+                                        if can_refresh_latency:
+                                            self._consider_runtime_latency_update(
+                                                delay_samples=delay_samples,
+                                                similarity=similarity,
+                                                aec_quality=aec_quality,
+                                                improvement_ratio=improvement_ratio,
+                                                backend=aec_backend,
+                                                double_talk=double_talk,
+                                                prefer_webrtc=self._aec_mode == "webrtc_preferred",
+                                            )
+                                        elif webrtc_success and delay_samples > 0 and not double_talk:
+                                            self._consider_runtime_latency_update(
+                                                delay_samples=delay_samples,
+                                                similarity=max(0.4, similarity),
+                                                aec_quality=max(0.08, aec_quality),
+                                                improvement_ratio=improvement_ratio,
+                                                backend=aec_backend,
+                                                double_talk=False,
+                                                prefer_webrtc=self._aec_mode == "webrtc_preferred",
+                                            )
+                                    except Exception:
+                                        processed_chunk = chunk
+                                        similarity = 0.0
+                                        residual_level = self._pcm16_level(chunk)
+                                        aec_quality = 0.0
+                                        double_talk = False
+                                        raw_voice_likelihood = 0.0
+                                        predicted_level = 0.0
+                                        improvement_ratio = 0.0
+                                        aec_backend = "custom"
+                                        webrtc_success = False
+                                        native_attempted = False
+                                        native_selected = False
+                                        selection_reason = "custom_fallback"
+                                        previous_calibration_latency = calibration_latency
+                                        reference_stats = {"available_samples": 0, "total_samples": 0, "callback_age_ms": -1}
+                                        reference_miss = True
+                                else:
+                                    predicted_level = 0.0
+                                    improvement_ratio = 0.0
+                                    aec_backend = "custom"
+                                    webrtc_success = False
+                                    native_attempted = False
+                                    native_selected = False
+                                    selection_reason = "custom_fallback"
+                                    self._record_aec_diag_sample(
+                                        residual_level=residual_level,
+                                        aec_quality=0.0,
+                                        double_talk=False,
+                                        delay_samples=0,
+                                        similarity=0.0,
+                                        reference_miss=True,
+                                    )
+                                if reference_ready:
+                                    pass
                             # Update last input VU level.
                             in_level = self._pcm16_level(processed_chunk)
-                            voice_likelihood = estimate_voice_likelihood_from_pcm16(processed_chunk)
+                            processed_voice_likelihood = estimate_voice_likelihood_from_pcm16(processed_chunk)
+                            if is_playing_out:
+                                playback_safe_raw_voice = raw_voice_likelihood * (0.45 if (double_talk or aec_quality > 0.22) else 0.2)
+                                voice_likelihood = max(processed_voice_likelihood, playback_safe_raw_voice)
+                            else:
+                                voice_likelihood = max(raw_voice_likelihood, processed_voice_likelihood)
+                            effective_aec_quality = max(aec_quality, 0.1 if webrtc_success else 0.0)
                             drop_chunk, drop_reason = _should_drop_mic_chunk(
                                 mode=self._mode,
                                 guard_active=guard_active,
@@ -906,10 +1397,66 @@ class ConversationWorker(QObject):
                                 input_level=max(in_level, voice_likelihood * 0.45),
                                 output_level=current_out_level,
                                 profile=self._guard_profile,
+                                residual_level=residual_level,
+                                voice_likelihood=voice_likelihood,
+                                double_talk=double_talk,
+                                aec_quality=effective_aec_quality,
                             )
+                            delay_drift = abs(int(self._guard_calibration.get("latency_samples", 0) or 0) - int(aec_result.get("delay_samples", 0) or 0))
+                            now_for_diag = time.monotonic()
+                            diag_interval_s = 0.8 if (reference_miss or similarity >= 0.4 or aec_backend == "webrtc" or double_talk) else 5.0
+                            should_log_problem_diag = bool(
+                                guard_active
+                                and now_for_diag - self._last_aec_diag_log_at >= diag_interval_s
+                                and (
+                                    reference_miss
+                                    or similarity >= 0.45
+                                    or webrtc_success
+                                    or aec_quality < 0.18
+                                    or double_talk
+                                    or delay_drift > 96
+                                )
+                            )
+                            should_log_success_diag = bool(
+                                guard_active
+                                and not should_log_problem_diag
+                                and now_for_diag - self._last_aec_success_log_at >= 2.0
+                                and (
+                                    aec_backend == "webrtc"
+                                    or webrtc_success
+                                    or (not reference_miss and similarity >= 0.2)
+                                    or (not reference_miss and predicted_level > 0.0 and improvement_ratio > 0.0)
+                                )
+                            )
+                            if should_log_problem_diag or should_log_success_diag:
+                                self._log_event(
+                                    "aec_diag",
+                                    similarity=round(similarity, 3),
+                                    residual_level=round(residual_level, 4),
+                                    aec_quality=round(aec_quality, 3),
+                                    predicted_level=round(predicted_level, 4),
+                                    improvement_ratio=round(improvement_ratio, 3),
+                                    backend=aec_backend,
+                                    webrtc_success=bool(webrtc_success),
+                                    native_attempted=bool(native_attempted),
+                                    native_selected=bool(native_selected),
+                                    selection_reason=selection_reason,
+                                    double_talk=bool(double_talk),
+                                    voice_likelihood=round(voice_likelihood, 3),
+                                    delay_samples=int(aec_result.get("delay_samples", 0) or 0) if guard_active and self._player is not None else 0,
+                                    calibration_latency=int(previous_calibration_latency if guard_active and self._player is not None else self._guard_calibration.get("latency_samples", 0) or 0),
+                                    reference_available=int(reference_stats.get("available_samples", 0) or 0),
+                                    reference_callback_age_ms=int(reference_stats.get("callback_age_ms", -1) or -1),
+                                    reference_miss=bool(reference_miss),
+                                )
+                                if should_log_problem_diag:
+                                    self._last_aec_diag_log_at = now_for_diag
+                                else:
+                                    self._last_aec_success_log_at = now_for_diag
                             barge_in_candidate = (
                                 is_playing_out
                                 and voice_likelihood >= 0.42
+                                and not drop_chunk
                                 and in_level >= max(
                                     float(self._guard_profile["barge_in_min_input_level"]) * 0.8,
                                     current_out_level * (float(self._guard_profile["barge_in_output_ratio"]) * 0.72),
@@ -924,6 +1471,9 @@ class ConversationWorker(QObject):
                                 playback_active=is_playing_out,
                                 reason=drop_reason,
                                 barge_in_candidate=barge_in_candidate,
+                                residual_level=residual_level,
+                                aec_quality=aec_quality,
+                                double_talk=double_talk,
                             )
                             if drop_chunk:
                                 self._echo_drop_count += 1
@@ -941,7 +1491,13 @@ class ConversationWorker(QObject):
                             self._last_in_level = in_level
                             if barge_in_candidate:
                                 self._barge_in_chunk_count += 1
-                            self._rt.append_audio_pcm16(processed_chunk)
+                            rt = self._rt
+                            if rt is None:
+                                continue
+                            try:
+                                rt.append_audio_pcm16(processed_chunk)
+                            except AttributeError:
+                                continue
 
                 # Output level from the audio callback (reflects actual playback).
                 if self._player is not None:
@@ -982,6 +1538,7 @@ class ConversationWorker(QObject):
 
     def _stop_realtime_session(self) -> None:
         self._mic_enabled.clear()
+        self._stop_rt_loop()
         try:
             if self._mic:
                 self._mic.stop()
@@ -1000,7 +1557,6 @@ class ConversationWorker(QObject):
         except Exception:
             pass
         self._rt = None
-        self._stop_rt_loop()
         self._mode = "idle"
         self._awaiting_transcript = False
         self._reconnect_attempts = 0
@@ -1015,6 +1571,7 @@ class ConversationWorker(QObject):
         self._stop_all.set()
         self._mode = "idle"
         self._mic_enabled.clear()
+        self._stop_rt_loop()
         try:
             if self._mic:
                 self._mic.stop()
@@ -1032,7 +1589,6 @@ class ConversationWorker(QObject):
         except Exception:
             pass
         self._rt = None
-        self._stop_rt_loop()
         self._reconnect_attempts = 0
         self._next_reconnect_at = 0.0
         self._mic_suppressed_until = 0.0
@@ -1059,7 +1615,11 @@ class ConversationWorker(QObject):
             self._set_state(_STATE_CONNECTING)
             rt = self._ensure_realtime("server_vad")
             self._start_rt_loop()
-            self._mic = RealtimeMicStream(samplerate=24000, device=self._resolved_input_device)
+            self._mic = RealtimeMicStream(
+                samplerate=24000,
+                device=self._resolved_input_device,
+                blocksize=self._preferred_frame_size(),
+            )
             self._mic.start()
             if getattr(self._mic, "using_resampler", False):
                 self._append_caption(
@@ -1088,7 +1648,11 @@ class ConversationWorker(QObject):
             rt = self._ensure_realtime("ptt")
             self._start_rt_loop()
             rt.clear_input_audio()
-            self._mic = RealtimeMicStream(samplerate=24000, device=self._resolved_input_device)
+            self._mic = RealtimeMicStream(
+                samplerate=24000,
+                device=self._resolved_input_device,
+                blocksize=self._preferred_frame_size(),
+            )
             self._mic.start()
             if getattr(self._mic, "using_resampler", False):
                 self._append_caption(
@@ -1362,8 +1926,28 @@ class MainWindow(QMainWindow):
             self._append_terminal_line(f"SELFTEST {mark}: {item['name']} | {item['detail']}")
 
         profile = result.get("profile")
+        calibration = result.get("calibration") if isinstance(result.get("calibration"), dict) else {}
         if isinstance(profile, dict) and profile:
             self._apply_audio_profile(profile, source=trigger)
+        if calibration:
+            in_dev, _ = pick_audio_device("input", None)
+            out_dev, _ = pick_audio_device("output", None)
+            try:
+                input_name = str(sd.query_devices(in_dev, "input").get("name", "default")) if in_dev is not None else "default"
+            except Exception:
+                input_name = "default"
+            try:
+                output_name = str(sd.query_devices(out_dev, "output").get("name", "default")) if out_dev is not None else "default"
+            except Exception:
+                output_name = "default"
+            self.settings.audio_guard_calibration = {
+                **calibration,
+                "profile": dict(profile) if isinstance(profile, dict) else {},
+                "input_device_name": input_name,
+                "output_device_name": output_name,
+                "device_fingerprint": calibration.get("device_fingerprint") or build_device_fingerprint(in_dev, out_dev, 24000),
+            }
+            self.settings.save()
 
         if restart_after and result.get("ok"):
             self._handsfree_running = True
@@ -1375,7 +1959,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Audio kalibrace doběhla.")
 
         if show_dialog:
-            QMessageBox.information(self, "Audio selftest", "Audio guard selftest:\n" + "\n".join(lines))
+            QMessageBox.information(self, "Audio selftest", "Audio guard selftest\n" + "\n".join(lines))
         return result
 
     def _save_defaults(self) -> None:
@@ -1418,6 +2002,10 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Nejdřív uložte OpenAI API klíč.")
             QMessageBox.warning(self, "API klíč", "Chybí OpenAI API klíč.")
             return
+
+        if not isinstance(self.settings.audio_guard_calibration, dict) or not self.settings.audio_guard_calibration:
+            self._append_terminal_line("SYS: Chybí uložený audio profil, spouštím krátký preflight.")
+            self._calibrate_audio_guard(trigger="preflight", show_dialog=False, restart_after=False)
 
         self._handsfree_running = True
         self.head.set_running(True)
@@ -1478,12 +2066,13 @@ class MainWindow(QMainWindow):
             f"stav={state}  samples={int(telemetry.get('samples', 0) or 0)}  "
             f"drop_rate={float(telemetry.get('drop_rate', 0.0) or 0.0):.3f}  "
             f"similarity={float(telemetry.get('avg_similarity', 0.0) or 0.0):.3f}  "
-            f"voice={float(telemetry.get('avg_voice_likelihood', 0.0) or 0.0):.3f}\n"
+            f"voice={float(telemetry.get('avg_voice_likelihood', 0.0) or 0.0):.3f}  "
+            f"aec={float(telemetry.get('avg_aec_quality', 0.0) or 0.0):.3f}\n"
             f"echo_soft={float(profile.get('echo_similarity_soft', 0.0) or 0.0):.3f}  "
             f"echo_drop={float(profile.get('echo_similarity_drop', 0.0) or 0.0):.3f}  "
             f"barge_in={float(profile.get('barge_in_min_input_level', 0.0) or 0.0):.3f}  "
             f"playback={float(profile.get('playback_activity_level', 0.0) or 0.0):.3f}\n"
-            f"mode={audio_mode}  aec={aec_aware}  learning={learning_mode}\n"
+            f"mode={audio_mode}  aec={aec_aware}  learning={learning_mode}  latency={int(data.get('calibration', {}).get('latency_samples', 0) or 0)}\n"
             f"mic={input_name[:42]} | spk={output_name[:42]}"
         )
 

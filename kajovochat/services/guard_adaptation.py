@@ -38,9 +38,14 @@ class GuardAdaptor:
         playback_ratio = float(telemetry.get("playback_ratio", 0.0) or 0.0)
         barge_in_ratio = float(telemetry.get("barge_in_ratio", 0.0) or 0.0)
         avg_output = float(telemetry.get("avg_output", 0.0) or 0.0)
+        avg_residual = float(telemetry.get("avg_residual", 0.0) or 0.0)
+        avg_aec_quality = float(telemetry.get("avg_aec_quality", 0.0) or 0.0)
+        double_talk_ratio = float(telemetry.get("double_talk_ratio", 0.0) or 0.0)
         step = 1.8 if learning_mode else 1.0
 
-        if aec_aware and playback_ratio > 0.22 and avg_output > 0.03 and similarity < 0.08:
+        if double_talk_ratio > 0.12 and voice_likelihood > 0.42:
+            self._state = "barge_ready"
+        elif aec_aware and playback_ratio > 0.22 and avg_output > 0.03 and similarity < 0.08:
             self._state = "aec_aware"
         elif similarity > 0.28 and playback_ratio > 0.18:
             self._state = "echo_heavy"
@@ -54,16 +59,22 @@ class GuardAdaptor:
             updated["echo_similarity_drop"] = min(0.97, updated["echo_similarity_drop"] + 0.012 * step)
             updated["playback_activity_level"] = min(0.16, updated["playback_activity_level"] + 0.002 * step)
             updated["server_vad_threshold"] = min(0.9, updated["server_vad_threshold"] + 0.004 * step)
+            if avg_residual > 0.03:
+                updated["barge_in_min_input_level"] = min(0.22, updated["barge_in_min_input_level"] + 0.002 * step)
         elif self._state == "aec_aware":
             updated["playback_activity_level"] = min(0.16, updated["playback_activity_level"] + 0.003 * step)
             updated["barge_in_output_ratio"] = min(1.9, updated["barge_in_output_ratio"] + 0.018 * step)
             updated["barge_in_min_input_level"] = min(0.22, updated["barge_in_min_input_level"] + 0.004 * step)
             updated["server_vad_threshold"] = min(0.9, updated["server_vad_threshold"] + 0.003 * step)
             updated["echo_similarity_soft"] = max(0.54, updated["echo_similarity_soft"] - 0.002)
+            if avg_aec_quality > 0.18:
+                updated["echo_similarity_drop"] = max(updated["echo_similarity_soft"] + 0.04, updated["echo_similarity_drop"] - 0.004)
         elif self._state == "barge_ready":
             updated["barge_in_min_input_level"] = max(0.04, updated["barge_in_min_input_level"] - 0.003 * step)
             updated["barge_in_output_ratio"] = max(1.12, updated["barge_in_output_ratio"] - 0.01 * step)
             updated["echo_similarity_soft"] = max(0.56, updated["echo_similarity_soft"] - 0.003 * step)
+            if double_talk_ratio > 0.08:
+                updated["server_vad_threshold"] = min(0.9, updated["server_vad_threshold"] + 0.002 * step)
         else:
             updated["echo_similarity_soft"] += (DEFAULT_AUDIO_GUARD_PROFILE["echo_similarity_soft"] - updated["echo_similarity_soft"]) * 0.08
             updated["echo_similarity_drop"] += (DEFAULT_AUDIO_GUARD_PROFILE["echo_similarity_drop"] - updated["echo_similarity_drop"]) * 0.08

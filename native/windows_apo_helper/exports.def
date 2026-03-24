@@ -1,0 +1,4 @@
+LIBRARY kajovochat_windows_apo
+EXPORTS
+    DllGetClassObject
+    DllCanUnloadNow

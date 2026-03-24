@@ -1,0 +1,56 @@
+; KajovoChat Windows APO instalacni kostra - production profil
+; Tento profil je urcen jako zaklad pro podepsany WDK balicek.
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = AudioProcessingObject
+ClassGuid   = {5989FCE8-9CD0-467D-8A6A-5419E31529D4}
+Provider    = %MfgName%
+CatalogFile = kajovochat_windows_apo.cat
+DriverVer   = 03/24/2026,1.0.0.0
+
+[Manufacturer]
+%MfgName% = KajovoChat,NTamd64
+
+[KajovoChat.NTamd64]
+%KajovoApo.DeviceDesc% = KajovoApo_Install, Root\KajovoChatApo
+
+[KajovoApo_Install.NT]
+CopyFiles = KajovoApo.CopyFiles
+AddReg    = KajovoApo.AddReg
+
+[KajovoApo.CopyFiles]
+kajovochat_windows_apo.dll
+
+[KajovoApo.AddReg]
+; Production profil ponechava MFX registraci jako vychozi a obsahuje
+; pripravenou EFX variantu pro pripad, ze cilovy endpoint bude vyzadovat
+; endpoint effect misto mode effect.
+HKR,"FX\\0",%PKEY_FX_ModeEffectClsid%,,%KAJOVOCHAT_APO_CLSID%
+HKR,"FX\\0",%PKEY_MFX_ProcessingModes_Supported_For_Streaming%,0x00010000,%AUDIO_SIGNALPROCESSINGMODE_DEFAULT%,%AUDIO_SIGNALPROCESSINGMODE_COMMUNICATIONS%
+; HKR,"FX\\0",%PKEY_FX_EndpointEffectClsid%,,%KAJOVOCHAT_APO_CLSID%
+; HKR,"FX\\0",%PKEY_EFX_ProcessingModes_Supported_For_Streaming%,0x00010000,%AUDIO_SIGNALPROCESSINGMODE_DEFAULT%
+HKR,,"FriendlyName",0x00000000,"KajovoChat APO"
+HKR,,"Profile",0x00000000,"production"
+
+[DestinationDirs]
+DefaultDestDir = 12
+KajovoApo.CopyFiles = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+kajovochat_windows_apo.dll = 1
+
+[Strings]
+MfgName = "KajovoChat"
+KajovoApo.DeviceDesc = "KajovoChat Windows APO"
+DiskName = "KajovoChat Windows APO Installation Media"
+PKEY_FX_ModeEffectClsid = "{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},6"
+PKEY_MFX_ProcessingModes_Supported_For_Streaming = "{D3993A3F-99C2-4402-B5EC-A92A0367664B},6"
+PKEY_FX_EndpointEffectClsid = "{D04E05A6-594B-4fb6-A80D-01AF5EED7D1D},15"
+PKEY_EFX_ProcessingModes_Supported_For_Streaming = "{D3993A3F-99C2-4402-B5EC-A92A0367664B},7"
+AUDIO_SIGNALPROCESSINGMODE_DEFAULT = "{C18E2F7E-933D-4965-B7D1-1EEF228D2AF3}"
+AUDIO_SIGNALPROCESSINGMODE_COMMUNICATIONS = "{98951333-B9CD-48B1-A0A3-FF40682D73F7}"
+KAJOVOCHAT_APO_CLSID = "{97A08C5E-05D2-4F6D-B5D8-5A4D8F9A7E42}"

@@ -8,6 +8,7 @@ from kajovochat.settings import (
     AppSettings,
     DEFAULT_AUDIO_GUARD_PROFILE,
     RESPONSE_STYLE_CHOICES,
+    _promote_audio_aec_mode_for_installed_native_backend,
     build_system_prompt,
 )
 
@@ -75,7 +76,66 @@ def test_load_migrates_legacy_and_reduces_schema(monkeypatch) -> None:
         assert settings.answer_language_mode == "fixed"
         assert settings.fixed_answer_language == "cs"
         assert settings.response_style == "stručný"
+        assert settings.audio_aec_mode == "windows_native_preferred"
         assert not hasattr(settings, "temperature")
+
+
+def test_audio_aec_mode_defaults_and_roundtrips(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+        config_dir = Path(temp_dir) / "cfg"
+        config_dir.mkdir()
+        config_path = config_dir / "settings.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "audio_aec_mode": "custom_only",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr("kajovochat.settings._config_path", lambda: config_path)
+        monkeypatch.setattr("kajovochat.settings._config_dir", lambda: config_dir)
+
+        settings = AppSettings.load()
+        assert settings.audio_aec_mode == "custom_only"
+
+        settings.audio_aec_mode = "webrtc_preferred"
+        settings.save()
+        reloaded = AppSettings.load()
+        assert reloaded.audio_aec_mode == "windows_native_preferred"
+
+
+def test_audio_aec_mode_normalizes_native_aliases() -> None:
+    settings = AppSettings(audio_aec_mode="windows_native")
+    assert settings.audio_aec_mode == "windows_native_preferred"
+
+
+def test_audio_aec_mode_promotes_webrtc_when_native_driver_is_installed(monkeypatch) -> None:
+    class DummyProbe:
+        available = True
+        installed_driver = True
+
+    monkeypatch.setattr(
+        "kajovochat.services.windows_native_aec.probe_windows_native_aec",
+        lambda: DummyProbe(),
+    )
+
+    assert _promote_audio_aec_mode_for_installed_native_backend("webrtc_preferred") == "windows_native_preferred"
+
+
+def test_audio_aec_mode_keeps_custom_only_even_when_native_driver_is_installed(monkeypatch) -> None:
+    class DummyProbe:
+        available = True
+        installed_driver = True
+
+    monkeypatch.setattr(
+        "kajovochat.services.windows_native_aec.probe_windows_native_aec",
+        lambda: DummyProbe(),
+    )
+
+    assert _promote_audio_aec_mode_for_installed_native_backend("custom_only") == "custom_only"
 
 
 def test_load_recovers_from_broken_settings_file(monkeypatch) -> None:

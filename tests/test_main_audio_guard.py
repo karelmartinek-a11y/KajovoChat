@@ -11,8 +11,12 @@ from kajovochat.main import (
     ConversationWorker,
     run_audio_guard_selftest,
 )
-from kajovochat.settings import AppSettings
-from kajovochat.services.audio_service import calibrate_audio_devices_advanced
+from kajovochat.settings import AppSettings, DEFAULT_AUDIO_GUARD_PROFILE
+from kajovochat.services.audio_service import build_device_fingerprint, calibrate_audio_devices_advanced
+from kajovochat.services.windows_native_aec import WindowsNativeAECProbe
+import math
+import numpy as np
+import time
 
 
 class _FakeRealtimeService:
@@ -209,3 +213,381 @@ def test_advanced_calibration_tries_fallback_samplerates(monkeypatch) -> None:
     assert 24000 in calls
     assert 48000 in calls
     assert result.playback_rms > result.ambient_rms
+
+
+def test_double_talk_is_not_dropped_when_voice_is_strong() -> None:
+    dropped, reason = _should_drop_mic_chunk(
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=0.74,
+        input_level=0.18,
+        output_level=0.08,
+        residual_level=0.11,
+        voice_likelihood=0.58,
+        double_talk=True,
+        aec_quality=0.22,
+    )
+
+    assert dropped is False
+    assert reason == ""
+
+
+def test_saved_calibration_matches_by_device_fingerprint() -> None:
+    settings = AppSettings()
+    worker = ConversationWorker(settings)
+    worker._resolved_input_device = 4
+    worker._resolved_output_device = 9
+    worker._input_device_name = "Jiny Mic"
+    worker._output_device_name = "Jiny Speaker"
+    worker._guard_calibration = {
+        "device_fingerprint": build_device_fingerprint(4, 9, 24000),
+        "input_device_name": "Stary Mic",
+        "output_device_name": "Stary Speaker",
+    }
+
+    assert worker._device_calibration_matches() is True
+
+
+def test_saved_calibration_applies_runtime_aec_and_frame_size() -> None:
+    settings = AppSettings()
+    worker = ConversationWorker(settings)
+    worker._resolved_input_device = 1
+    worker._resolved_output_device = 2
+    worker._guard_calibration = {
+        "device_fingerprint": build_device_fingerprint(1, 2, 24000),
+        "preferred_frame_size": 960,
+        "filter_length": 1024,
+        "latency_samples": 320,
+        "profile": {
+            "echo_similarity_drop": 0.88,
+        },
+    }
+
+    worker._apply_saved_calibration()
+    worker._ensure_player()
+
+    assert worker._aec.filter_length == 1024
+    assert worker._aec.last_shift == 320
+    assert worker._aec.max_shift_samples >= 960
+    assert worker._player is not None
+    assert worker._player.blocksize == 960
+
+
+def test_conversation_worker_normalizes_aec_mode_from_settings() -> None:
+    settings = AppSettings(audio_aec_mode="webrtc")
+    worker = ConversationWorker(settings)
+
+    assert worker._aec_mode == "webrtc_preferred"
+
+
+def test_webrtc_preferred_mode_relaxes_guard_thresholds() -> None:
+    worker = ConversationWorker(AppSettings(audio_aec_mode="webrtc_preferred"))
+    worker._guard_profile = dict(DEFAULT_AUDIO_GUARD_PROFILE)
+    worker._aec_mode = "webrtc_preferred"
+
+    worker._apply_aec_mode_policy()
+
+    assert worker._guard_profile["echo_similarity_soft"] < DEFAULT_AUDIO_GUARD_PROFILE["echo_similarity_soft"]
+    assert worker._guard_profile["echo_similarity_drop"] < DEFAULT_AUDIO_GUARD_PROFILE["echo_similarity_drop"]
+    assert worker._guard_profile["playback_activity_level"] <= DEFAULT_AUDIO_GUARD_PROFILE["playback_activity_level"]
+
+
+def test_webrtc_preferred_mode_keeps_far_drift_guardrails() -> None:
+    worker = ConversationWorker(AppSettings(audio_aec_mode="webrtc_preferred"))
+    worker._guard_calibration = {"latency_samples": 722, "filter_length": 1024}
+    worker._configure_aec_from_calibration()
+
+    result = worker._aec.process(
+        (np.random.default_rng(7).normal(0.0, 0.02, size=960).astype(np.float32) * 32767.0).astype(np.int16).tobytes(),
+        (np.random.default_rng(8).normal(0.0, 0.02, size=2400).astype(np.float32) * 32767.0).astype(np.int16),
+        max_shift_samples=1400,
+        expected_shift=722,
+        aec_mode="webrtc_preferred",
+    )
+
+    assert result["backend"] in {"custom", "webrtc"}
+    assert result["webrtc_success"] in {True, False}
+
+
+def test_guard_debug_includes_native_aec_probe(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "kajovochat.main.probe_windows_native_aec",
+        lambda: WindowsNativeAECProbe(False, "helper absent"),
+    )
+    worker = ConversationWorker(AppSettings())
+    captured: dict[str, object] = {}
+    worker.guard_debug_updated.connect(lambda payload: captured.update(payload if isinstance(payload, dict) else {}))
+
+    worker._emit_guard_debug()
+
+    assert captured["native_aec_available"] is False
+    assert captured["native_aec_reason"] == "helper absent"
+
+
+def test_aec_output_drives_guard_to_drop_pure_echo_but_keep_double_talk() -> None:
+    samplerate = 24000
+    rng = np.random.default_rng(21)
+    total = 18000
+    reference = (
+        rng.normal(0.0, 0.18, size=total)
+        + 0.25 * np.sin(np.arange(total, dtype=np.float32) * 0.12)
+        + 0.12 * np.sin(np.arange(total, dtype=np.float32) * 0.047 + 0.2)
+    ).astype(np.float32)
+    reference = np.clip(reference, -1.0, 1.0)
+    chunk_size = 960
+    shift = 480
+    direct = reference[-(chunk_size + shift) : -shift]
+    echo = 0.7 * direct + 0.18 * np.roll(direct, 40) - 0.08 * np.roll(direct, 100)
+    user = 0.19 * np.sin(2.0 * math.pi * 260.0 * np.arange(chunk_size, dtype=np.float32) / samplerate)
+    user += 0.09 * np.sin(2.0 * math.pi * 520.0 * np.arange(chunk_size, dtype=np.float32) / samplerate + 0.4)
+
+    worker = ConversationWorker(AppSettings())
+    worker._guard_calibration = {"latency_samples": shift, "filter_length": 1024}
+    worker._configure_aec_from_calibration()
+
+    echo_result = worker._aec.process(
+        (np.clip(echo, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes(),
+        (reference * 22000.0).astype(np.int16),
+        max_shift_samples=1400,
+        expected_shift=shift,
+    )
+    echo_pcm = bytes(echo_result["pcm"])
+    echo_level = worker._pcm16_level(echo_pcm)
+    echo_drop, echo_reason = _should_drop_mic_chunk(
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=float(echo_result["similarity"]),
+        input_level=echo_level,
+        output_level=0.12,
+        residual_level=float(echo_result["residual_level"]),
+        voice_likelihood=0.05,
+        double_talk=bool(echo_result["double_talk"]),
+        aec_quality=float(echo_result["aec_quality"]),
+    )
+
+    mixed = np.clip(echo + user, -1.0, 1.0)
+    mixed_result = worker._aec.process(
+        (mixed * 32767.0).astype(np.int16).tobytes(),
+        (reference * 22000.0).astype(np.int16),
+        max_shift_samples=1400,
+        expected_shift=shift,
+    )
+    mixed_pcm = bytes(mixed_result["pcm"])
+    mixed_level = worker._pcm16_level(mixed_pcm)
+    mixed_drop, mixed_reason = _should_drop_mic_chunk(
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=float(mixed_result["similarity"]),
+        input_level=max(mixed_level, 0.58 * 0.45),
+        output_level=0.12,
+        residual_level=float(mixed_result["residual_level"]),
+        voice_likelihood=0.58,
+        double_talk=bool(mixed_result["double_talk"]),
+        aec_quality=float(mixed_result["aec_quality"]),
+    )
+
+    assert echo_drop is True
+    assert echo_reason in {"echo_similarity", "echo_residual", "quiet_bleed"}
+    assert mixed_result["double_talk"] is True
+    assert mixed_drop is False
+    assert mixed_reason == ""
+
+
+def test_runtime_latency_update_requires_repeated_stable_hits() -> None:
+    worker = ConversationWorker(AppSettings())
+    worker._guard_calibration = {"latency_samples": 540, "filter_length": 1024}
+    worker._configure_aec_from_calibration()
+
+    worker._consider_runtime_latency_update(
+        delay_samples=620,
+        similarity=0.56,
+        aec_quality=0.12,
+        improvement_ratio=0.18,
+        backend="webrtc",
+        double_talk=False,
+    )
+    assert worker._guard_calibration["latency_samples"] == 540
+
+    worker._consider_runtime_latency_update(
+        delay_samples=624,
+        similarity=0.58,
+        aec_quality=0.13,
+        improvement_ratio=0.17,
+        backend="webrtc",
+        double_talk=False,
+    )
+    assert worker._guard_calibration["latency_samples"] == 540
+
+    worker._consider_runtime_latency_update(
+        delay_samples=626,
+        similarity=0.57,
+        aec_quality=0.14,
+        improvement_ratio=0.16,
+        backend="webrtc",
+        double_talk=False,
+    )
+    assert worker._guard_calibration["latency_samples"] == 540
+
+    worker._consider_runtime_latency_update(
+        delay_samples=628,
+        similarity=0.59,
+        aec_quality=0.14,
+        improvement_ratio=0.18,
+        backend="webrtc",
+        double_talk=False,
+    )
+    assert worker._guard_calibration["latency_samples"] > 540
+    assert worker._guard_calibration["latency_samples"] <= 540 + max(160, worker._aec.filter_length // 2)
+
+
+def test_webrtc_preferred_latency_update_commits_faster_than_custom() -> None:
+    worker = ConversationWorker(AppSettings(audio_aec_mode="webrtc_preferred"))
+    worker._guard_calibration = {"latency_samples": 540, "filter_length": 1024}
+    worker._configure_aec_from_calibration()
+
+    for delay in (612, 616):
+        worker._consider_runtime_latency_update(
+            delay_samples=delay,
+            similarity=0.49,
+            aec_quality=0.09,
+            improvement_ratio=0.15,
+            backend="webrtc",
+            double_talk=False,
+            prefer_webrtc=True,
+        )
+
+    assert worker._guard_calibration["latency_samples"] == 540
+
+    worker._consider_runtime_latency_update(
+        delay_samples=618,
+        similarity=0.51,
+        aec_quality=0.1,
+        improvement_ratio=0.16,
+        backend="webrtc",
+        double_talk=False,
+        prefer_webrtc=True,
+    )
+
+    assert worker._guard_calibration["latency_samples"] > 540
+
+
+def test_runtime_latency_update_rejects_far_webrtc_jump() -> None:
+    worker = ConversationWorker(AppSettings())
+    worker._guard_calibration = {"latency_samples": 540, "filter_length": 1024}
+    worker._configure_aec_from_calibration()
+
+    worker._consider_runtime_latency_update(
+        delay_samples=40,
+        similarity=0.52,
+        aec_quality=0.12,
+        improvement_ratio=0.2,
+        backend="webrtc",
+        double_talk=False,
+    )
+
+    assert worker._guard_calibration["latency_samples"] == 540
+
+
+def test_reference_ready_allows_early_start_when_played_samples_are_available() -> None:
+    worker = ConversationWorker(AppSettings())
+    worker._playback_reference_armed = True
+    worker._reference_warmup_until = time.monotonic() + 1.0
+
+    needed = worker._reference_needed_samples(1920)
+    ready = worker._is_reference_ready(
+        now_monotonic=time.monotonic(),
+        reference_needed=needed,
+        available_samples=needed + 64,
+        played_samples=max(needed // 2, 480),
+        callback_age_ms=-1,
+    )
+
+    assert ready is True
+
+
+def test_reference_ready_tolerates_unknown_callback_age_when_playback_is_warm() -> None:
+    worker = ConversationWorker(AppSettings())
+    worker._playback_reference_armed = True
+    worker._reference_warmup_until = time.monotonic() + 1.0
+
+    needed = worker._reference_needed_samples(1920)
+    ready = worker._is_reference_ready(
+        now_monotonic=time.monotonic(),
+        reference_needed=needed,
+        available_samples=needed + 128,
+        played_samples=max(needed // 4, 240),
+        callback_age_ms=-1,
+    )
+
+    assert ready is True
+
+
+def test_cached_reference_fallback_accepts_recent_nearly_full_tail() -> None:
+    worker = ConversationWorker(AppSettings())
+    worker._cached_reference_at = time.monotonic()
+
+    needed = worker._reference_needed_samples(1920)
+    assert worker._can_use_cached_reference(
+        now_monotonic=time.monotonic(),
+        reference_needed=needed,
+        cached_samples=needed - 120,
+    ) is True
+
+
+def test_cached_reference_fallback_allows_smaller_recent_tail() -> None:
+    worker = ConversationWorker(AppSettings())
+    worker._cached_reference_at = time.monotonic()
+
+    needed = worker._reference_needed_samples(1920)
+    assert worker._can_use_cached_reference(
+        now_monotonic=time.monotonic(),
+        reference_needed=needed,
+        cached_samples=needed - 280,
+    ) is True
+
+
+def test_cached_reference_fallback_allows_zero_available_samples_when_recent() -> None:
+    worker = ConversationWorker(AppSettings())
+    worker._cached_reference_at = time.monotonic()
+    worker._cached_echo_reference = (np.arange(720, dtype=np.int16)).tobytes()
+
+    assert worker._can_use_cached_reference(
+        now_monotonic=time.monotonic(),
+        reference_needed=720,
+        cached_samples=720,
+    ) is True
+
+
+def test_stop_realtime_session_stops_loop_before_clearing_rt(monkeypatch) -> None:
+    worker = ConversationWorker(AppSettings())
+    events: list[str] = []
+
+    class _FakeRT:
+        def close(self) -> None:
+            events.append("close_rt")
+
+    worker._rt = _FakeRT()
+    worker._stop_rt_loop = lambda timeout_s=1.0: events.append("stop_loop")  # type: ignore[method-assign]
+
+    worker._stop_realtime_session()
+
+    assert events[:2] == ["stop_loop", "close_rt"]
+
+
+def test_request_stop_stops_loop_before_clearing_rt() -> None:
+    worker = ConversationWorker(AppSettings())
+    events: list[str] = []
+
+    class _FakeRT:
+        def close(self) -> None:
+            events.append("close_rt")
+
+    worker._rt = _FakeRT()
+    worker._stop_rt_loop = lambda timeout_s=1.0: events.append("stop_loop")  # type: ignore[method-assign]
+
+    worker.request_stop()
+
+    assert events[:2] == ["stop_loop", "close_rt"]
