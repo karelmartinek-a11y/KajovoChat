@@ -13,6 +13,7 @@ oddeleny host/helper projekt, ktery:
 
 - DLL `kajovochat_windows_apo`
 - exporty `kajovochat_aec_*` pro kompatibilitu s existujicim bridge
+- exporty `kajovochat_apo_capture_*` pro cistou capture-only APO cestu
 - test pro synteticky echo scenar
 - integrace do `probe_windows_native_aec()`
 
@@ -26,6 +27,7 @@ oddeleny host/helper projekt, ktery:
 
 ## Poznamka k funkcnosti
 
- Tenhle helper je prvni mezikrok k APO ceste. Nezapojuje se jeste do skutecneho
-systemoveho APO registracniho mechanismu. Slouzi jako samostatna host vrstva a
-uz dnes umi echo cancellation pres stejny C ABI jako AEC helper.
+Tenhle helper je mezikrok k cistejsi APO ceste. Nezapojuje se jeste do plneho
+systemoveho WASAPI/WDK capture kontraktu, ale uz exposeuje samostatny
+capture-only ABI `kajovochat_apo_capture_*`, ktery nevyzaduje app-level
+playback reference.

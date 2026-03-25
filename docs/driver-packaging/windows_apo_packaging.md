@@ -26,7 +26,7 @@ nasazeni na Windows notebooku.
 
 1. Doplnit presne CLSID a endpoint binding podle ciloveho zarizeni.
 2. Pripravit podpis a test na konkretnim notebooku.
-3. Po uspechu nastavit `windows_native_preferred` jako prvni volbu s fallbackem na `webrtc_preferred`.
+3. Po uspechu nastavit `windows_system_aec` jako prvni volbu s fallbackem na `webrtc_apm`.
 4. Pouzit staging skript pro konzistentni balicek DLL + INF + manifest.
 
 ## Ocekavany prubeh na Windows

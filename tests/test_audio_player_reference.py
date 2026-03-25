@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from kajovochat.services.audio_service import AudioPlayer
+from kajovochat.services.audio_service import AudioPlayer, DuplexAudioSession
 
 
 def test_audio_player_echo_reference_tracks_played_target_samples() -> None:
@@ -50,3 +50,22 @@ def test_audio_player_echo_reference_respects_capture_time() -> None:
     assert delayed.size == 120
     assert int(delayed[0]) == 2
     assert int(delayed[-1]) == 2
+
+
+def test_duplex_audio_session_exposes_unified_runtime_state() -> None:
+    duplex = DuplexAudioSession(samplerate=24000, input_device=None, output_device=None, blocksize=480)
+
+    duplex.player._echo_reference_enqueued_samples = 160
+    duplex.player._echo_reference_played_samples = 120
+    duplex.player._echo_reference_chunks.append((160, b"\x01\x00" * 160))
+    duplex.mic._captured_samples = 96
+    duplex.mic._last_capture_mono_ns = time.monotonic_ns()
+
+    state = duplex.get_runtime_state()
+
+    assert state["clock_mode"] == "unified_duplex"
+    assert state["buffered_bytes"] == 0
+    assert state["pending_chunk_count"] == 0
+    assert state["rendered_samples"] == 120
+    assert state["captured_samples"] == 96
+    assert state["reference_available_samples"] >= 0

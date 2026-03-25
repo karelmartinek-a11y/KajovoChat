@@ -18,9 +18,16 @@ import soundfile as sf
 from scipy import signal
 import math
 
+from ..audio.aec_backends import (
+    AecBackendContext,
+    WebRtcApmBackendRunner,
+    WindowsSystemAecBackendRunner,
+)
+from ..audio.aec_orchestration import process_adaptive_echo
+from ..audio.contracts import CaptureFrame, RenderFrame
 from .lip_sync_engine import LipSyncEngine
 from .voice_features import estimate_voice_likelihood_from_pcm16
-from .windows_native_aec import WindowsNativeAECBackend, probe_windows_native_aec
+from ..audio.aec_native import WindowsNativeAecResources
 from ..settings import DEFAULT_AUDIO_AEC_MODE, normalize_audio_aec_mode
 
 try:
@@ -86,6 +93,56 @@ class AudioCalibrationResult:
 class CapturedAudioChunk:
     pcm_bytes: bytes
     captured_at_mono_ns: int
+
+    def to_capture_frame(
+        self,
+        *,
+        frame_index: int,
+        sample_rate: int,
+        channels: int = 1,
+        processed_mic_pcm16: Optional[bytes] = None,
+        render_ref_pcm16: Optional[bytes] = None,
+        aec_backend: str = "unknown",
+        aec_quality: float = 0.0,
+        residual_level: float = 0.0,
+        vad_probability: float = 0.0,
+        double_talk: bool = False,
+        stream_delay_ms: int = 0,
+        device_clock_locked: bool = True,
+    ) -> CaptureFrame:
+        return CaptureFrame(
+            frame_index=int(frame_index),
+            mono_ns=int(self.captured_at_mono_ns),
+            raw_mic_pcm16=self.pcm_bytes,
+            processed_mic_pcm16=processed_mic_pcm16 if processed_mic_pcm16 is not None else self.pcm_bytes,
+            render_ref_pcm16=render_ref_pcm16,
+            sample_rate=int(sample_rate),
+            channels=int(channels),
+            aec_backend=aec_backend,
+            aec_quality=float(aec_quality),
+            residual_level=float(residual_level),
+            vad_probability=float(vad_probability),
+            double_talk=bool(double_talk),
+            stream_delay_ms=int(stream_delay_ms),
+            device_clock_locked=bool(device_clock_locked),
+        )
+
+
+@dataclass
+class ReferencePrepResult:
+    mic: np.ndarray
+    mic_centered: np.ndarray
+    context_norm: np.ndarray
+    design: np.ndarray
+    segment: np.ndarray
+    similarity: float
+    best_shift: int
+    mic_level: float
+    ref_level: float
+    anchor_shift: int
+    shift_error: int
+    stable_delay_lock: bool
+    voice_likelihood: float
 
 
 def list_audio_devices() -> dict:
@@ -573,19 +630,48 @@ class AdaptiveEchoCanceller:
         self._delay_lock_shift = 0
         self._delay_lock_votes = 0
         self._last_double_talk = False
-        self._windows_native_probe = probe_windows_native_aec()
-        self._windows_native_backend: Optional[WindowsNativeAECBackend] = None
-        self._windows_native_backend_attempted = False
+        self._native_aec_resources = WindowsNativeAecResources(
+            samplerate=self.samplerate,
+            filter_length=self._filter_length,
+            max_shift_samples=self.max_shift_samples,
+        )
+        self._windows_native_probe = self._native_aec_resources.probe
         self._external_backend: Optional[_WebRTCAECBackend] = None
         if WebRTCAudioProcessor is not None:
             try:
                 self._external_backend = _WebRTCAECBackend(input_samplerate=self.samplerate)
             except Exception:
                 self._external_backend = None
+        self._windows_system_runner = WindowsSystemAecBackendRunner(self)
+        self._webrtc_runner = WebRtcApmBackendRunner(self)
 
     @property
     def last_shift(self) -> int:
         return int(self._last_shift)
+
+    @property
+    def _windows_native_backend(self):
+        return self._native_aec_resources.backend
+
+    @_windows_native_backend.setter
+    def _windows_native_backend(self, value) -> None:
+        self._native_aec_resources._backend = value
+
+    @property
+    def _windows_native_session(self):
+        return self._native_aec_resources.session
+
+    @_windows_native_session.setter
+    def _windows_native_session(self, value) -> None:
+        self._native_aec_resources._session = value
+
+    @property
+    def _windows_native_backend_attempted(self) -> bool:
+        return bool(self._native_aec_resources._backend_attempted)
+
+    @_windows_native_backend_attempted.setter
+    def _windows_native_backend_attempted(self, value: bool) -> None:
+        self._native_aec_resources._backend_attempted = bool(value)
 
     @property
     def filter_length(self) -> int:
@@ -597,8 +683,11 @@ class AdaptiveEchoCanceller:
         if filter_length is not None:
             self._filter_length = max(256, int(filter_length))
             self._weights = np.zeros((self._filter_length,), dtype=np.float32)
-            self._windows_native_backend = None
-            self._windows_native_backend_attempted = False
+            self._native_aec_resources.reconfigure(
+                filter_length=self._filter_length,
+                max_shift_samples=self.max_shift_samples,
+            )
+            self._windows_native_probe = self._native_aec_resources.probe
 
     def reset(self) -> None:
         self._weights = np.zeros((self._filter_length,), dtype=np.float32)
@@ -606,8 +695,8 @@ class AdaptiveEchoCanceller:
         self._delay_lock_shift = 0
         self._delay_lock_votes = 0
         self._last_double_talk = False
-        self._windows_native_backend = None
-        self._windows_native_backend_attempted = False
+        self._native_aec_resources.reset()
+        self._windows_native_probe = self._native_aec_resources.probe
 
     @staticmethod
     def _build_tapped_matrix(context: np.ndarray, taps: int) -> np.ndarray:
@@ -666,22 +755,11 @@ class AdaptiveEchoCanceller:
         except Exception:
             return self._nlms_candidate(matrix, target, iterations=2)
 
-    def _ensure_windows_native_backend(self) -> Optional[WindowsNativeAECBackend]:
-        if self._windows_native_backend is not None:
-            return self._windows_native_backend
-        if self._windows_native_backend_attempted:
-            return None
-        self._windows_native_backend_attempted = True
-        if self._windows_native_probe.available:
-            try:
-                self._windows_native_backend = WindowsNativeAECBackend(
-                    input_samplerate=self.samplerate,
-                    filter_length=self._filter_length,
-                    max_shift_samples=self.max_shift_samples,
-                )
-            except Exception:
-                self._windows_native_backend = None
-        return self._windows_native_backend
+    def _ensure_windows_native_backend(self):
+        return self._native_aec_resources.ensure_backend()
+
+    def _ensure_windows_native_session(self):
+        return self._native_aec_resources.ensure_session()
 
     @staticmethod
     def _detect_double_talk(
@@ -765,39 +843,20 @@ class AdaptiveEchoCanceller:
             alpha = 0.01
         self._last_shift = int(round((self._last_shift * (1.0 - alpha)) + (target * alpha)))
 
-    def process(
+    def _prepare_reference_window(
         self,
+        *,
         mic_pcm: bytes,
         reference: np.ndarray,
-        *,
-        max_shift_samples: Optional[int] = None,
-        expected_shift: Optional[int] = None,
-        aec_mode: str = DEFAULT_AUDIO_AEC_MODE,
-    ) -> dict[str, object]:
-        aec_mode = normalize_audio_aec_mode(aec_mode)
-        prefer_native_mode = bool(aec_mode == "windows_native_preferred")
-        prefer_webrtc_mode = bool(aec_mode == "webrtc_preferred")
-        custom_only_mode = bool(aec_mode == "custom_only")
-        if not mic_pcm:
-            return {
-                "pcm": b"",
-                "similarity": 0.0,
-                "delay_samples": int(self._last_shift),
-                "double_talk": False,
-                "residual_level": 0.0,
-                "mic_level": 0.0,
-                "aec_quality": 0.0,
-                "webrtc_success": False,
-                "voice_likelihood": 0.0,
-            }
-
+        expected_shift: Optional[int],
+        max_shift_samples: Optional[int],
+    ) -> tuple[Optional[ReferencePrepResult], Optional[dict[str, object]]]:
         mic = np.frombuffer(mic_pcm, dtype=np.int16).astype(np.float32)
         ref = np.asarray(reference, dtype=np.int16).astype(np.float32).reshape(-1)
         voice_likelihood = float(estimate_voice_likelihood_from_pcm16(mic_pcm))
-        anchor_shift = self._last_shift if expected_shift is None else int(expected_shift)
         if mic.size < 120 or ref.size < mic.size:
             level = _rms(mic / 32768.0)
-            return {
+            return None, {
                 "pcm": mic_pcm,
                 "similarity": 0.0,
                 "delay_samples": int(self._last_shift),
@@ -809,6 +868,7 @@ class AdaptiveEchoCanceller:
                 "voice_likelihood": voice_likelihood,
             }
 
+        anchor_shift = self._last_shift if expected_shift is None else int(expected_shift)
         shift_limit = self.max_shift_samples if max_shift_samples is None else int(max_shift_samples)
         segment, similarity, best_shift = _find_best_alignment(
             mic,
@@ -818,7 +878,7 @@ class AdaptiveEchoCanceller:
         )
         if segment.size != mic.size or similarity < 0.04:
             level = _rms(mic / 32768.0)
-            return {
+            return None, {
                 "pcm": mic_pcm,
                 "similarity": float(similarity),
                 "delay_samples": int(best_shift),
@@ -834,7 +894,7 @@ class AdaptiveEchoCanceller:
         context = _extract_reference_context(ref, mic.size, best_shift, taps)
         if context.size != mic.size + taps - 1:
             level = _rms(mic / 32768.0)
-            return {
+            return None, {
                 "pcm": mic_pcm,
                 "similarity": float(similarity),
                 "delay_samples": int(best_shift),
@@ -851,318 +911,242 @@ class AdaptiveEchoCanceller:
         context_norm = (context / 32768.0).astype(np.float32)
         context_norm -= float(np.mean(context_norm))
         design = self._build_tapped_matrix(context_norm, taps)
-        active_weights = self._weights.astype(np.float32, copy=True)
-        predicted_before = design @ active_weights
-
         mic_level = _rms(mic / 32768.0)
         ref_level = _rms(segment / 32768.0)
-        predicted_level_before = _rms(predicted_before)
-        residual_before = mic_centered - predicted_before
-        residual_level_before = _rms(residual_before)
-
-        probe_weights, predicted_probe = self._nlms_candidate(design, mic_centered, iterations=1)
-        residual_probe = mic_centered - predicted_probe
-        residual_level_probe = _rms(residual_probe)
-        predicted_level_probe = _rms(predicted_probe)
-        improvement_ratio = 1.0 - min(1.0, residual_level_probe / max(mic_level, 1e-4))
+        shift_error = abs(int(best_shift) - int(anchor_shift or 0)) if anchor_shift > 0 else 0
         stable_delay_lock = bool(
             self._delay_lock_votes >= 3
             and self._delay_lock_shift > 0
             and abs(int(best_shift) - int(self._delay_lock_shift)) <= max(64, taps // 6)
         )
-        shift_error = abs(int(best_shift) - int(anchor_shift or 0)) if anchor_shift > 0 else 0
-        custom_anchor_guard = bool(anchor_shift > 0 and shift_error > max(176, taps // 3) and similarity < 0.78)
+        return ReferencePrepResult(
+            mic=mic,
+            mic_centered=mic_centered,
+            context_norm=context_norm,
+            design=design,
+            segment=segment,
+            similarity=float(similarity),
+            best_shift=int(best_shift),
+            mic_level=float(mic_level),
+            ref_level=float(ref_level),
+            anchor_shift=int(anchor_shift),
+            shift_error=int(shift_error),
+            stable_delay_lock=bool(stable_delay_lock),
+            voice_likelihood=float(voice_likelihood),
+        ), None
+
+    def _process_windows_system_capture(self, mic_pcm: bytes) -> dict[str, object]:
+        mic = np.frombuffer(mic_pcm, dtype=np.int16).astype(np.float32)
+        mic_level = _rms(mic / 32768.0) if mic.size else 0.0
+        voice_likelihood = float(estimate_voice_likelihood_from_pcm16(mic_pcm)) if mic_pcm else 0.0
+        return {
+            "pcm": mic_pcm,
+            "similarity": 0.0,
+            "delay_samples": 0,
+            "double_talk": False,
+            "residual_level": float(mic_level),
+            "mic_level": float(mic_level),
+            "aec_quality": 0.16,
+            "predicted_level": 0.0,
+            "improvement_ratio": 0.0,
+            "backend": "windows_system_capture",
+            "backend_policy": "windows_system_aec",
+            "webrtc_success": False,
+            "native_attempted": True,
+            "native_selected": True,
+            "selection_reason": "windows_system_capture",
+            "voice_likelihood": voice_likelihood,
+            "system_capture_processed": True,
+        }
+
+    def _process_webrtc_only(
+        self,
+        *,
+        mic_pcm: bytes,
+        reference: np.ndarray,
+        expected_shift: Optional[int],
+        max_shift_samples: Optional[int],
+    ) -> dict[str, object]:
+        prep, early_result = self._prepare_reference_window(
+            mic_pcm=mic_pcm,
+            reference=reference,
+            expected_shift=expected_shift,
+            max_shift_samples=max_shift_samples,
+        )
+        if early_result is not None:
+            result = dict(early_result)
+            result.update(
+                {
+                    "predicted_level": 0.0,
+                    "improvement_ratio": 0.0,
+                    "backend": "webrtc",
+                    "backend_policy": "webrtc_apm",
+                    "native_attempted": False,
+                    "native_selected": False,
+                    "selection_reason": "webrtc_reference_unavailable",
+                }
+            )
+            return result
+        assert prep is not None
+        mic_level = float(prep.mic_level)
         double_talk = self._detect_double_talk(
-            similarity=similarity,
-            mic_level=mic_level,
-            ref_level=ref_level,
-            predicted_level=predicted_level_probe,
-            residual_level=residual_level_probe,
-            improvement_ratio=improvement_ratio,
-            voice_likelihood=voice_likelihood,
+            similarity=prep.similarity,
+            mic_level=prep.mic_level,
+            ref_level=prep.ref_level,
+            predicted_level=0.0,
+            residual_level=prep.mic_level,
+            improvement_ratio=0.0,
+            voice_likelihood=prep.voice_likelihood,
             previous_double_talk=self._last_double_talk,
         )
-        adapt_allowed = bool(
-            similarity >= 0.45
-            and ref_level >= 0.012
-            and predicted_level_probe >= 0.015
-            and not double_talk
-            and not custom_anchor_guard
-            and (anchor_shift <= 0 or shift_error <= max(176, taps // 3) or stable_delay_lock or similarity >= 0.88)
-        )
-
-        if adapt_allowed:
-            iterations = 2 if similarity >= 0.72 else 1
-            nlms_weights, _predicted_after = self._nlms_candidate(
-                design,
-                mic_centered,
-                iterations=iterations,
-                initial_weights=probe_weights,
-            )
-            candidate_weights = nlms_weights
-            if similarity >= 0.45:
-                ridge_weights, ridge_predicted = self._ridge_candidate(
-                    design,
-                    mic_centered,
-                    ridge=max(self.ridge, 2.5e-3),
-                )
-                ridge_residual = mic_centered - ridge_predicted
-                ridge_residual_level = _rms(ridge_residual)
-                ridge_predicted_level = _rms(ridge_predicted)
-                ridge_improvement = 1.0 - min(1.0, ridge_residual_level / max(mic_level, 1e-4))
-                if ridge_predicted_level >= predicted_level_probe * 0.8 and ridge_improvement >= improvement_ratio - 0.04:
-                    candidate_weights = (nlms_weights * 0.4) + (ridge_weights * 0.6)
-            if np.any(self._weights):
-                blend = 0.18
-                if similarity >= 0.72 and improvement_ratio >= 0.12:
-                    blend = 0.42
-                elif similarity >= 0.55 and improvement_ratio >= 0.06:
-                    blend = 0.28
-                self._weights = (self._weights * (1.0 - blend)) + (candidate_weights * blend)
-            else:
-                self._weights = candidate_weights
-            active_weights = self._weights
-            predicted = design @ active_weights
-            residual = mic_centered - predicted
-        else:
-            predicted = predicted_before
-            residual = residual_before
-
-        post_similarity = _normalized_similarity(segment.astype(np.int16), (residual * 32767.0).astype(np.int16), max_shift_samples=0)
-        if similarity >= 0.24 and post_similarity >= 0.1 and not double_talk:
-            suppress = min(0.2, max(0.0, similarity - post_similarity) * 0.3 + 0.06)
-            residual -= context_norm[taps - 1 :] * suppress
-        cleaned = np.clip((residual + float(np.mean(mic / 32768.0))) * 32767.0, -32768.0, 32767.0).astype(np.int16)
-        residual_level = _rms(cleaned.astype(np.float32) / 32768.0)
-        predicted_level = _rms(predicted)
-        improvement_ratio = max(0.0, 1.0 - min(1.0, residual_level / max(mic_level, 1e-4)))
-        backend_used = "custom"
-        webrtc_success = False
-        native_attempted = False
-        native_selected = False
-        selection_reason = "custom_fallback"
-        probe_similarity = float(similarity)
-        probe_shift = int(best_shift)
-        probe_shift_error = int(shift_error)
-        if (
-            similarity >= 0.2
-            and backend_used == "custom"
-            and improvement_ratio < 0.03
-            and not double_talk
-        ):
-            similarity = min(float(similarity), 0.08)
-            predicted_level = 0.0
-            residual_level = float(mic_level)
-            best_shift = 0
-            cleaned = mic.astype(np.int16, copy=False)
-            selection_reason = "custom_low_gain"
-        if self._windows_native_probe.available and prefer_native_mode and segment.size == mic.size and not double_talk:
-            try:
-                native_backend = self._ensure_windows_native_backend()
-                if native_backend is not None:
-                    native_attempted = True
-                    native_pcm = native_backend.process(
-                        mic_pcm=mic_pcm,
-                        reference_pcm=segment.astype(np.int16, copy=False),
-                        delay_ms=int(round(probe_shift * (1000.0 / float(self.samplerate)))),
-                    )
-                    native_cleaned = np.frombuffer(native_pcm, dtype=np.int16).astype(np.float32) / 32768.0
-                    native_residual_level = _rms(native_cleaned)
-                    native_improvement = max(0.0, 1.0 - min(1.0, native_residual_level / max(mic_level, 1e-4)))
-                    native_predicted_level = max(0.0, mic_level - native_residual_level)
-                    native_strong = bool(
-                        native_improvement >= 0.2
-                        and native_residual_level <= max(0.0035, mic_level * 0.12)
-                    )
-                    prefer_native = bool(
-                        native_improvement >= improvement_ratio + 0.02
-                        or (
-                            probe_similarity >= 0.3
-                            and native_residual_level <= residual_level * 1.05
-                            and native_improvement >= max(0.02, improvement_ratio - 0.01)
-                        )
-                        or (
-                            stable_delay_lock
-                            and native_improvement >= max(0.08, improvement_ratio + 0.015)
-                            and native_residual_level <= residual_level * 0.96
-                        )
-                    )
-                    if prefer_native_mode:
-                        prefer_native = bool(
-                            prefer_native
-                            or (
-                                native_improvement >= max(0.08, improvement_ratio + 0.02)
-                                and native_residual_level <= residual_level * 1.0
-                                and (
-                                    probe_similarity >= 0.28
-                                    or (stable_delay_lock and ref_level >= 0.01 and mic_level >= 0.01)
-                                )
-                            )
-                            or (
-                                backend_used == "custom"
-                                and native_improvement >= 0.12
-                                and native_residual_level <= residual_level * 0.98
-                            )
-                        )
-                    if anchor_shift > 0 and probe_shift_error > max(240, taps // 3) and voice_likelihood >= 0.55:
-                        prefer_native = False
-                    if prefer_native:
-                        cleaned = np.frombuffer(native_pcm, dtype=np.int16).copy()
-                        similarity = probe_similarity
-                        residual_level = float(native_residual_level)
-                        improvement_ratio = float(native_improvement)
-                        predicted_level = max(float(predicted_level), float(native_predicted_level))
-                        best_shift = probe_shift
-                        backend_used = "windows_native"
-                        webrtc_success = native_strong
-                        native_selected = True
-                        selection_reason = "windows_native_preferred"
-                        if (
-                            probe_similarity >= 0.35
-                            and native_improvement >= 0.05
-                            and (
-                                self._delay_lock_shift <= 0
-                                or abs(int(probe_shift) - int(self._delay_lock_shift)) <= max(128, self._filter_length // 4)
-                            )
-                        ):
-                            self._delay_lock_shift = int(probe_shift)
-                            self._delay_lock_votes = max(self._delay_lock_votes, 3)
-            except Exception:
-                pass
-        allow_webrtc_probe = bool(
-            (
-                probe_similarity >= 0.18
-                and (anchor_shift <= 0 or probe_shift_error <= max(288, taps // 2) or probe_similarity >= 0.62)
-            )
-            or (
-                stable_delay_lock
-                and ref_level >= 0.012
-                and mic_level >= 0.01
-                and predicted_level_probe >= 0.003
-            )
-        )
-        if custom_only_mode:
-            allow_webrtc_probe = False
-        elif prefer_webrtc_mode:
-            allow_webrtc_probe = bool(
-                allow_webrtc_probe
-                or (
-                    stable_delay_lock
-                    and ref_level >= 0.008
-                    and mic_level >= 0.008
-                    and probe_similarity >= 0.14
-                )
-            )
-        if self._external_backend is not None and allow_webrtc_probe and segment.size == mic.size and not double_talk:
-            try:
-                delay_ms = int(round(probe_shift * (1000.0 / float(self.samplerate))))
-                external_pcm = self._external_backend.process(
-                    mic_pcm=mic_pcm,
-                    reference_pcm=segment.astype(np.int16, copy=False),
-                    delay_ms=delay_ms,
-                )
-                external_cleaned = np.frombuffer(external_pcm, dtype=np.int16).astype(np.float32) / 32768.0
-                external_residual_level = _rms(external_cleaned)
-                external_improvement = max(0.0, 1.0 - min(1.0, external_residual_level / max(mic_level, 1e-4)))
-                external_predicted_level = max(0.0, mic_level - external_residual_level)
-                strong_external = bool(
-                    external_improvement >= 0.18
-                    and external_residual_level <= max(0.0035, mic_level * 0.12)
-                )
-                prefer_external = bool(
-                    external_improvement >= improvement_ratio + 0.02
-                    or (
-                        probe_similarity >= 0.35
-                        and external_residual_level <= residual_level * 1.08
-                        and external_improvement >= max(0.02, improvement_ratio - 0.01)
-                    )
-                    or (
-                        probe_similarity >= 0.5 and external_residual_level <= residual_level * 1.02
-                    )
-                    or (
-                        stable_delay_lock
-                        and external_improvement >= max(0.08, improvement_ratio + 0.015)
-                        and external_residual_level <= residual_level * 0.96
-                    )
-                    or (
-                        probe_similarity >= 0.18
-                        and improvement_ratio < 0.02
-                        and external_improvement >= 0.05
-                        and external_residual_level <= residual_level * 0.96
-                    )
-                )
-                if anchor_shift > 0 and probe_shift_error > max(320, taps // 2) and probe_similarity < 0.68:
-                    prefer_external = False
-                if anchor_shift > 0 and probe_shift_error > max(240, taps // 3) and voice_likelihood >= 0.55:
-                    prefer_external = False
-                if prefer_native_mode and backend_used == "windows_native":
-                    prefer_external = bool(
-                        external_improvement >= improvement_ratio + 0.35
-                        or (
-                            strong_external
-                            and external_improvement >= improvement_ratio + 0.18
-                            and external_residual_level <= residual_level * 0.75
-                            and probe_similarity >= 0.6
-                        )
-                    )
-                if not strong_external:
-                    if external_improvement < improvement_ratio + 0.12:
-                        prefer_external = False
-                    if voice_likelihood >= 0.55 and external_improvement < 0.45:
-                        prefer_external = False
-                if prefer_external:
-                    cleaned = np.frombuffer(external_pcm, dtype=np.int16).copy()
-                    similarity = probe_similarity
-                    residual_level = float(external_residual_level)
-                    improvement_ratio = float(external_improvement)
-                    predicted_level = max(float(predicted_level), float(external_predicted_level))
-                    best_shift = probe_shift
-                    backend_used = "webrtc"
-                    webrtc_success = strong_external
-                    native_selected = False
-                    selection_reason = "webrtc_override"
-                    if (
-                        probe_similarity >= 0.4
-                        and external_improvement >= 0.05
-                        and (
-                            self._delay_lock_shift <= 0
-                            or abs(int(probe_shift) - int(self._delay_lock_shift)) <= max(128, self._filter_length // 4)
-                        )
-                        ):
-                            self._delay_lock_shift = int(probe_shift)
-                            self._delay_lock_votes = max(self._delay_lock_votes, 3)
-            except Exception:
-                pass
-        quality = float(
-            max(
-                0.0,
-                min(
-                    1.0,
-                    similarity
-                    * improvement_ratio
-                    * min(1.0, predicted_level / max(ref_level, 1e-4) * 1.2),
-                ),
-            )
-        )
-        self._update_delay_tracker(best_shift, similarity)
         self._last_double_talk = bool(double_talk)
+        if double_talk:
+            return {
+                "pcm": mic_pcm,
+                "similarity": float(prep.similarity),
+                "delay_samples": int(prep.best_shift),
+                "double_talk": True,
+                "residual_level": mic_level,
+                "mic_level": mic_level,
+                "aec_quality": 0.0,
+                "predicted_level": 0.0,
+                "improvement_ratio": 0.0,
+                "backend": "webrtc",
+                "backend_policy": "webrtc_apm",
+                "webrtc_success": False,
+                "native_attempted": False,
+                "native_selected": False,
+                "selection_reason": "webrtc_double_talk_passthrough",
+                "voice_likelihood": float(prep.voice_likelihood),
+            }
+        webrtc_result = self._run_webrtc_apm(
+            prep=prep,
+            mic_pcm=mic_pcm,
+            residual_level=mic_level,
+            improvement_ratio=0.0,
+            predicted_level=0.0,
+            prefer_native_mode=False,
+            backend_used="webrtc",
+        )
+        if webrtc_result is not None:
+            quality = float(
+                max(
+                    0.0,
+                    min(
+                        1.0,
+                        float(webrtc_result["similarity"])
+                        * float(webrtc_result["improvement_ratio"])
+                        * min(1.0, float(webrtc_result["predicted_level"]) / max(prep.ref_level, 1e-4) * 1.2),
+                    ),
+                )
+            )
+            self._update_delay_tracker(int(webrtc_result["delay_samples"]), float(webrtc_result["similarity"]))
+            return {
+                "pcm": webrtc_result["pcm"].tobytes(),
+                "similarity": float(webrtc_result["similarity"]),
+                "delay_samples": int(webrtc_result["delay_samples"]),
+                "double_talk": False,
+                "residual_level": float(webrtc_result["residual_level"]),
+                "mic_level": mic_level,
+                "aec_quality": quality,
+                "predicted_level": float(webrtc_result["predicted_level"]),
+                "improvement_ratio": float(webrtc_result["improvement_ratio"]),
+                "backend": "webrtc",
+                "backend_policy": "webrtc_apm",
+                "webrtc_success": bool(webrtc_result["webrtc_success"]),
+                "native_attempted": False,
+                "native_selected": False,
+                "selection_reason": "webrtc_apm",
+                "voice_likelihood": float(prep.voice_likelihood),
+            }
         return {
-            "pcm": cleaned.tobytes(),
-            "similarity": float(similarity),
-            "delay_samples": int(best_shift),
-            "double_talk": bool(double_talk),
-            "residual_level": float(residual_level),
-            "mic_level": float(mic_level),
-            "aec_quality": quality,
-            "predicted_level": float(predicted_level),
-            "improvement_ratio": float(improvement_ratio),
-            "backend": backend_used,
-            "webrtc_success": bool(webrtc_success),
-            "native_attempted": bool(native_attempted),
-            "native_selected": bool(native_selected),
-            "selection_reason": selection_reason,
-            "voice_likelihood": voice_likelihood,
+            "pcm": mic_pcm,
+            "similarity": float(prep.similarity),
+            "delay_samples": int(prep.best_shift),
+            "double_talk": False,
+            "residual_level": mic_level,
+            "mic_level": mic_level,
+            "aec_quality": 0.0,
+            "predicted_level": 0.0,
+            "improvement_ratio": 0.0,
+            "backend": "webrtc",
+            "backend_policy": "webrtc_apm",
+            "webrtc_success": False,
+            "native_attempted": False,
+            "native_selected": False,
+            "selection_reason": "webrtc_no_gain",
+            "voice_likelihood": float(prep.voice_likelihood),
         }
+
+    def _run_windows_system_aec(
+        self,
+        *,
+        prep: ReferencePrepResult,
+        mic_pcm: bytes,
+        residual_level: float,
+        improvement_ratio: float,
+        predicted_level: float,
+        backend_used: str,
+    ) -> Optional[dict[str, object]]:
+        result = self._windows_system_runner.run(
+            context=AecBackendContext(
+                prep=prep,
+                mic_pcm=mic_pcm,
+                residual_level=residual_level,
+                improvement_ratio=improvement_ratio,
+                predicted_level=predicted_level,
+                backend_used=backend_used,
+            )
+        )
+        if result is None:
+            return None
+        if hasattr(result, "as_dict"):
+            return result.as_dict()
+        return result
+
+    def _run_webrtc_apm(
+        self,
+        *,
+        prep: ReferencePrepResult,
+        mic_pcm: bytes,
+        residual_level: float,
+        improvement_ratio: float,
+        predicted_level: float,
+        prefer_native_mode: bool,
+        backend_used: str,
+    ) -> Optional[dict[str, object]]:
+        result = self._webrtc_runner.run(
+            context=AecBackendContext(
+                prep=prep,
+                mic_pcm=mic_pcm,
+                residual_level=residual_level,
+                improvement_ratio=improvement_ratio,
+                predicted_level=predicted_level,
+                backend_used=backend_used,
+                prefer_native_mode=prefer_native_mode,
+            )
+        )
+        if result is None:
+            return None
+        return result.as_dict()
+
+    def process(
+        self,
+        mic_pcm: bytes,
+        reference: np.ndarray,
+        *,
+        max_shift_samples: Optional[int] = None,
+        expected_shift: Optional[int] = None,
+        aec_mode: str = "custom_lab",
+    ) -> dict[str, object]:
+        return process_adaptive_echo(
+            self,
+            mic_pcm,
+            reference,
+            max_shift_samples=max_shift_samples,
+            expected_shift=expected_shift,
+            aec_mode=aec_mode,
+        )
 
 
 def suppress_echo_from_pcm16(
@@ -1552,6 +1536,7 @@ class AudioPlayer:
         self._echo_reference_max_samples = int(self.target_samplerate * 2.0)
         self._last_callback_mono_ns = 0
         self._echo_reference_played_end_mono_ns = 0
+        self._started_mono_ns = time.monotonic_ns()
 
     def _ensure_stream(self) -> None:
         if self._stream:
@@ -1854,6 +1839,9 @@ class RealtimeMicStream:
         self._stream: Optional[sd.InputStream] = None
         self._queue: "queue.Queue[CapturedAudioChunk]" = queue.Queue(maxsize=200)
         self._running = False
+        self._started_mono_ns = 0
+        self._last_capture_mono_ns = 0
+        self._captured_samples = 0
 
     @property
     def queue(self) -> "queue.Queue[CapturedAudioChunk]":
@@ -1870,6 +1858,9 @@ class RealtimeMicStream:
         if self._running:
             return
         self._running = True
+        self._started_mono_ns = time.monotonic_ns()
+        self._last_capture_mono_ns = 0
+        self._captured_samples = 0
 
         # Try opening the mic at 24kHz; if the device/driver rejects it,
         # fall back to the device default rate and resample to 24kHz.
@@ -1921,6 +1912,8 @@ class RealtimeMicStream:
             if not self._running:
                 return
             captured_at_mono_ns = time.monotonic_ns()
+            self._last_capture_mono_ns = captured_at_mono_ns
+            self._captured_samples += int(frames)
             try:
                 # indata dtype=int16, shape=(frames, 1)
                 if not self.using_resampler:
@@ -1978,12 +1971,543 @@ class RealtimeMicStream:
             except Exception:
                 pass
         self._stream = None
+        self._last_capture_mono_ns = 0
+        self._captured_samples = 0
         # best-effort clear
         try:
             while True:
                 self._queue.get_nowait()
         except Exception:
             pass
+
+class _DuplexPlayerView:
+    """Kompatibilni pohled na render cast duplex session."""
+
+    def __init__(self, session: "DuplexAudioSession") -> None:
+        self._session = session
+
+    @property
+    def samplerate(self) -> int:
+        return int(self._session.stream_samplerate)
+
+    @property
+    def target_samplerate(self) -> int:
+        return int(self._session.samplerate)
+
+    @property
+    def device(self) -> Optional[int]:
+        return self._session.output_device
+
+    @property
+    def blocksize(self) -> int:
+        return int(self._session.blocksize)
+
+    @property
+    def buffered_bytes(self) -> int:
+        return int(self._session.buffered_bytes)
+
+    @property
+    def _echo_reference_chunks(self) -> "deque[tuple[int, bytes]]":
+        return self._session._echo_reference_chunks
+
+    @property
+    def _echo_reference_enqueued_samples(self) -> int:
+        return int(self._session._echo_reference_enqueued_samples)
+
+    @_echo_reference_enqueued_samples.setter
+    def _echo_reference_enqueued_samples(self, value: int) -> None:
+        self._session._echo_reference_enqueued_samples = int(value)
+
+    @property
+    def _echo_reference_played_samples(self) -> int:
+        return int(self._session._echo_reference_played_samples)
+
+    @_echo_reference_played_samples.setter
+    def _echo_reference_played_samples(self, value: int) -> None:
+        self._session._echo_reference_played_samples = int(value)
+
+    @property
+    def _last_callback_mono_ns(self) -> int:
+        return int(self._session._last_callback_mono_ns)
+
+    @_last_callback_mono_ns.setter
+    def _last_callback_mono_ns(self, value: int) -> None:
+        self._session._last_callback_mono_ns = int(value)
+
+    @property
+    def _echo_reference_played_end_mono_ns(self) -> int:
+        return int(self._session._echo_reference_played_end_mono_ns)
+
+    @_echo_reference_played_end_mono_ns.setter
+    def _echo_reference_played_end_mono_ns(self, value: int) -> None:
+        self._session._echo_reference_played_end_mono_ns = int(value)
+
+    def stop(self) -> None:
+        self._session.stop()
+
+    def enqueue_pcm16(self, pcm_bytes: bytes) -> None:
+        self._session.enqueue_pcm16(pcm_bytes)
+
+    def get_level(self) -> float:
+        return self._session.get_level()
+
+    def get_lipsync_snapshot(self) -> dict[str, object]:
+        return self._session.get_lipsync_snapshot()
+
+    def get_echo_reference(self, max_samples: int = 4096) -> np.ndarray:
+        return self._session.get_echo_reference(max_samples=max_samples)
+
+    def get_echo_reference_for_capture(self, *, max_samples: int = 4096, captured_at_mono_ns: Optional[int]) -> np.ndarray:
+        return self._session.get_echo_reference_for_capture(max_samples=max_samples, captured_at_mono_ns=captured_at_mono_ns)
+
+    def get_echo_reference_stats(self) -> dict[str, int]:
+        return self._session.get_echo_reference_stats()
+
+
+class _DuplexMicView:
+    """Kompatibilni pohled na capture cast duplex session."""
+
+    def __init__(self, session: "DuplexAudioSession") -> None:
+        self._session = session
+
+    @property
+    def samplerate(self) -> int:
+        return int(self._session.samplerate)
+
+    @property
+    def device(self) -> Optional[int]:
+        return self._session.input_device
+
+    @property
+    def blocksize(self) -> int:
+        return int(self._session.blocksize)
+
+    @property
+    def using_resampler(self) -> bool:
+        return bool(self._session.using_input_resampler)
+
+    @property
+    def input_samplerate(self) -> int:
+        return int(self._session.input_samplerate)
+
+    @property
+    def queue(self) -> "queue.Queue[CapturedAudioChunk]":
+        return self._session.queue
+
+    @property
+    def pending_chunk_count(self) -> int:
+        return int(self._session.pending_chunk_count)
+
+    @property
+    def _last_capture_mono_ns(self) -> int:
+        return int(self._session._last_capture_mono_ns)
+
+    @_last_capture_mono_ns.setter
+    def _last_capture_mono_ns(self, value: int) -> None:
+        self._session._last_capture_mono_ns = int(value)
+
+    @property
+    def _captured_samples(self) -> int:
+        return int(self._session._captured_samples)
+
+    @_captured_samples.setter
+    def _captured_samples(self, value: int) -> None:
+        self._session._captured_samples = int(value)
+
+    def start(self) -> None:
+        self._session.start_mic()
+
+    def stop(self) -> None:
+        self._session.stop_mic()
+
+
+class DuplexAudioSession:
+    """Session-owned wrapper pro společné vlastnictví render a capture I/O."""
+
+    def __init__(
+        self,
+        *,
+        samplerate: int = 24000,
+        input_device: Optional[int] = None,
+        output_device: Optional[int] = None,
+        blocksize: int = 480,
+    ) -> None:
+        self.started_at_mono_ns = time.monotonic_ns()
+        self.samplerate = int(samplerate)
+        self.input_device = input_device
+        self.output_device = output_device
+        self.blocksize = int(blocksize)
+        self.stream_samplerate = int(samplerate)
+        self.stream_blocksize = int(blocksize)
+        self._lock = threading.Lock()
+        self._stream: Optional[sd.Stream] = None
+        self._running = False
+        self._closed = False
+        self._playback_buffer = bytearray()
+        self._capture_queue: "queue.Queue[CapturedAudioChunk]" = queue.Queue(maxsize=200)
+        self._level: float = 0.0
+        self._lip_sync = LipSyncEngine()
+        self._echo_reference_chunks: "deque[tuple[int, bytes]]" = deque()
+        self._echo_reference_enqueued_samples = 0
+        self._echo_reference_played_samples = 0
+        self._echo_reference_max_samples = int(self.samplerate * 2.0)
+        self._last_callback_mono_ns = 0
+        self._last_render_mono_ns = 0
+        self._last_capture_mono_ns = 0
+        self._echo_reference_played_end_mono_ns = 0
+        self._captured_samples = 0
+        self.input_samplerate = int(samplerate)
+        self.using_input_resampler = False
+        self._input_overlap = 0
+        self._input_prev = np.zeros((0,), dtype=np.int16)
+        self.player = _DuplexPlayerView(self)
+        self.mic = _DuplexMicView(self)
+
+    def _candidate_stream_rates(self) -> list[int]:
+        candidates = [int(self.samplerate)]
+        try:
+            input_info = sd.query_devices(self.input_device, "input") if self.input_device is not None else sd.query_devices(None, "input")
+            input_default = int(input_info.get("default_samplerate") or 0)
+            if input_default > 0:
+                candidates.append(input_default)
+        except Exception:
+            pass
+        try:
+            output_info = sd.query_devices(self.output_device, "output") if self.output_device is not None else sd.query_devices(None, "output")
+            output_default = int(output_info.get("default_samplerate") or 0)
+            if output_default > 0:
+                candidates.append(output_default)
+        except Exception:
+            pass
+        unique: list[int] = []
+        for rate in candidates:
+            if rate > 0 and rate not in unique:
+                unique.append(rate)
+        return unique or [int(self.samplerate)]
+
+    def _ensure_stream(self) -> None:
+        if self._stream is not None:
+            return
+
+        last_error: Optional[Exception] = None
+
+        def callback(indata, outdata, frames, time_info, status) -> None:
+            del time_info, status
+            now_ns = time.monotonic_ns()
+            need_bytes = int(frames) * 2
+            with self._lock:
+                self._last_callback_mono_ns = now_ns
+                if self._closed:
+                    outdata[:] = 0
+                    return
+                if len(self._playback_buffer) >= need_bytes:
+                    played_bytes = bytes(self._playback_buffer[:need_bytes])
+                    del self._playback_buffer[:need_bytes]
+                else:
+                    played_bytes = bytes(self._playback_buffer)
+                    self._playback_buffer.clear()
+
+            played = np.frombuffer(played_bytes, dtype=np.int16)
+            played_frames = int(played.size)
+            if played.size < frames:
+                padded = np.zeros((int(frames),), dtype=np.int16)
+                if played.size:
+                    padded[: played.size] = played
+                played = padded
+            outdata[:, 0] = played
+
+            try:
+                pcm = played.astype(np.float32) / 32768.0
+                rms = float(np.sqrt(np.mean(pcm * pcm) + 1e-12))
+                peak = float(np.max(np.abs(pcm))) if pcm.size else 0.0
+                self._level = float(max(0.0, min(1.0, max(rms * 1.8, peak))))
+            except Exception:
+                self._level = 0.0
+
+            try:
+                played_target_samples = max(0, int(round(played_frames * (self.samplerate / float(self.stream_samplerate)))))
+                with self._lock:
+                    self._echo_reference_played_samples += played_target_samples
+                    playback_horizon_ns = int(round(played_target_samples * (1_000_000_000.0 / float(self.samplerate))))
+                    self._echo_reference_played_end_mono_ns = now_ns + playback_horizon_ns
+                    self._last_render_mono_ns = now_ns
+                    while self._echo_reference_chunks:
+                        oldest_end = self._echo_reference_chunks[0][0]
+                        if self._echo_reference_played_samples - oldest_end <= self._echo_reference_max_samples:
+                            break
+                        self._echo_reference_chunks.popleft()
+            except Exception:
+                pass
+
+            try:
+                self._lip_sync.consume_playback_pcm16(played.tobytes(), samplerate=self.stream_samplerate)
+            except Exception:
+                pass
+
+            try:
+                incoming = np.asarray(indata).reshape(-1).astype(np.int16, copy=False)
+                if self.using_input_resampler:
+                    combined = np.concatenate([self._input_prev, incoming]) if self._input_prev.size else incoming
+                    resampled = _resample_pcm16_mono(combined, self.input_samplerate, self.samplerate)
+                    if self._input_prev.size > 0:
+                        drop = int(round(self._input_prev.size * (self.samplerate / float(self.input_samplerate))))
+                        if 0 < drop < resampled.size:
+                            resampled = resampled[drop:]
+                    if combined.size > self._input_overlap:
+                        self._input_prev = combined[-self._input_overlap :].copy()
+                    else:
+                        self._input_prev = combined.copy()
+                    captured = resampled
+                else:
+                    captured = incoming.copy()
+                self._last_capture_mono_ns = now_ns
+                self._captured_samples += int(captured.size)
+                if captured.size > 0:
+                    self._capture_queue.put_nowait(
+                        CapturedAudioChunk(
+                            pcm_bytes=captured.astype(np.int16, copy=False).tobytes(),
+                            captured_at_mono_ns=now_ns,
+                        )
+                    )
+            except Exception:
+                return
+
+        for rate in self._candidate_stream_rates():
+            try:
+                block = int(round(rate * (self.blocksize / float(self.samplerate))))
+                block = max(128, block)
+                stream = sd.Stream(
+                    samplerate=int(rate),
+                    channels=1,
+                    dtype="int16",
+                    blocksize=block,
+                    device=(self.input_device, self.output_device),
+                    callback=callback,
+                )
+                stream.start()
+                self.stream_samplerate = int(rate)
+                self.stream_blocksize = int(block)
+                self.input_samplerate = int(rate)
+                self.using_input_resampler = bool(self.input_samplerate != self.samplerate)
+                if self.using_input_resampler:
+                    self._input_overlap = max(256, min(int(round(self.input_samplerate * 0.03)), 4096))
+                    self._input_prev = np.zeros((0,), dtype=np.int16)
+                else:
+                    self._input_overlap = 0
+                    self._input_prev = np.zeros((0,), dtype=np.int16)
+                self._stream = stream
+                self._running = True
+                self._closed = False
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                self._stream = None
+        if last_error is not None:
+            raise last_error
+
+    @property
+    def buffered_bytes(self) -> int:
+        try:
+            with self._lock:
+                return int(len(self._playback_buffer))
+        except Exception:
+            return 0
+
+    @property
+    def pending_chunk_count(self) -> int:
+        try:
+            return int(self._capture_queue.qsize())
+        except Exception:
+            return 0
+
+    @property
+    def queue(self) -> "queue.Queue[CapturedAudioChunk]":
+        return self._capture_queue
+
+    def start_mic(self) -> None:
+        self._ensure_stream()
+
+    def stop_mic(self) -> None:
+        self.stop()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._closed = True
+            self._playback_buffer.clear()
+        if self._stream:
+            try:
+                self._stream.stop()
+            except Exception:
+                pass
+            try:
+                self._stream.close()
+            except Exception:
+                pass
+        self._stream = None
+        self._running = False
+        self._closed = False
+        self._level = 0.0
+        self._lip_sync.reset()
+        self._echo_reference_chunks.clear()
+        self._echo_reference_enqueued_samples = 0
+        self._echo_reference_played_samples = 0
+        self._last_callback_mono_ns = 0
+        self._last_render_mono_ns = 0
+        self._last_capture_mono_ns = 0
+        self._echo_reference_played_end_mono_ns = 0
+        self._captured_samples = 0
+        self._input_prev = np.zeros((0,), dtype=np.int16)
+        try:
+            while True:
+                self._capture_queue.get_nowait()
+        except Exception:
+            pass
+
+    def enqueue_pcm16(self, pcm_bytes: bytes) -> None:
+        if not pcm_bytes:
+            return
+        self._ensure_stream()
+        try:
+            target_samples = len(pcm_bytes) // 2
+            if target_samples > 0:
+                with self._lock:
+                    self._echo_reference_enqueued_samples += target_samples
+                    self._echo_reference_chunks.append((self._echo_reference_enqueued_samples, bytes(pcm_bytes)))
+                    while self._echo_reference_chunks:
+                        oldest_end = self._echo_reference_chunks[0][0]
+                        if self._echo_reference_enqueued_samples - oldest_end <= self._echo_reference_max_samples:
+                            break
+                        self._echo_reference_chunks.popleft()
+        except Exception:
+            pass
+
+        stream_pcm = pcm_bytes
+        if self.stream_samplerate != self.samplerate:
+            try:
+                source = np.frombuffer(pcm_bytes, dtype=np.int16)
+                stream_pcm = _resample_pcm16_mono(source, self.samplerate, self.stream_samplerate).tobytes()
+            except Exception:
+                pass
+        with self._lock:
+            self._playback_buffer.extend(stream_pcm)
+
+    def build_render_frame(
+        self,
+        *,
+        frame_index: int,
+        mono_ns: Optional[int],
+        pcm16: bytes,
+        tts_active: bool,
+        prompted_by_assistant_turn: Optional[str] = None,
+    ) -> RenderFrame:
+        return RenderFrame(
+            frame_index=int(frame_index),
+            mono_ns=int(mono_ns if mono_ns is not None else time.monotonic_ns()),
+            pcm16=bytes(pcm16),
+            tts_active=bool(tts_active),
+            prompted_by_assistant_turn=prompted_by_assistant_turn,
+        )
+
+    def get_level(self) -> float:
+        try:
+            return float(self._level)
+        except Exception:
+            return 0.0
+
+    def get_echo_reference(self, max_samples: int = 4096) -> np.ndarray:
+        return self.get_echo_reference_for_capture(max_samples=max_samples, captured_at_mono_ns=None)
+
+    def get_echo_reference_for_capture(self, *, max_samples: int = 4096, captured_at_mono_ns: Optional[int]) -> np.ndarray:
+        try:
+            need_samples = max(1, int(max_samples))
+            with self._lock:
+                if not self._echo_reference_chunks:
+                    return np.zeros((0,), dtype=np.int16)
+                played_end = self._echo_reference_played_samples
+                if captured_at_mono_ns is not None and self._echo_reference_played_end_mono_ns > 0:
+                    future_ns = max(0, int(self._echo_reference_played_end_mono_ns) - int(captured_at_mono_ns))
+                    if future_ns > 0:
+                        future_samples = int(round(future_ns * (self.samplerate / 1_000_000_000.0)))
+                        played_end = max(0, played_end - future_samples)
+                if played_end <= 0:
+                    return np.zeros((0,), dtype=np.int16)
+                start_sample = max(0, played_end - need_samples)
+                chunks: list[bytes] = []
+                cursor = played_end
+                for end_sample, payload in reversed(self._echo_reference_chunks):
+                    payload_samples = len(payload) // 2
+                    chunk_start = end_sample - payload_samples
+                    overlap_start = max(chunk_start, start_sample)
+                    overlap_end = min(end_sample, played_end)
+                    if overlap_end <= overlap_start:
+                        continue
+                    offset_start = overlap_start - chunk_start
+                    offset_end = overlap_end - chunk_start
+                    payload_view = memoryview(payload)[offset_start * 2 : offset_end * 2]
+                    chunks.append(bytes(payload_view))
+                    cursor = overlap_start
+                    if cursor <= start_sample:
+                        break
+                tail = b"".join(reversed(chunks))
+            if not tail:
+                return np.zeros((0,), dtype=np.int16)
+            array = np.frombuffer(tail, dtype=np.int16)
+            if array.size > need_samples:
+                array = array[-need_samples:]
+            return array.copy()
+        except Exception:
+            return np.zeros((0,), dtype=np.int16)
+
+    def get_echo_reference_stats(self) -> dict[str, int]:
+        try:
+            with self._lock:
+                available_samples = sum(len(payload) // 2 for _, payload in self._echo_reference_chunks)
+                return {
+                    "available_samples": int(max(0, min(available_samples, self._echo_reference_played_samples))),
+                    "total_samples": int(self._echo_reference_enqueued_samples),
+                    "played_samples": int(self._echo_reference_played_samples),
+                    "callback_age_ms": int((time.monotonic_ns() - self._last_callback_mono_ns) / 1_000_000) if self._last_callback_mono_ns else -1,
+                    "played_end_mono_ns": int(self._echo_reference_played_end_mono_ns),
+                }
+        except Exception:
+            return {"available_samples": 0, "total_samples": 0, "played_samples": 0, "callback_age_ms": -1, "played_end_mono_ns": 0}
+
+    def get_lipsync_snapshot(self) -> dict[str, object]:
+        try:
+            snap = self._lip_sync.snapshot()
+            return {
+                "pose": snap.pose,
+                "openness": snap.openness,
+                "energy": snap.energy,
+                "weights": dict(snap.weights),
+            }
+        except Exception:
+            return {
+                "pose": "closed",
+                "openness": 0.0,
+                "energy": 0.0,
+                "weights": {"closed": 1.0, "small": 0.0, "aa": 0.0, "ee": 0.0, "oo": 0.0},
+            }
+
+    def get_runtime_state(self) -> dict[str, object]:
+        reference_stats = self.get_echo_reference_stats()
+        now_ns = time.monotonic_ns()
+        last_render_ns = int(reference_stats.get("played_end_mono_ns", 0) or 0)
+        last_capture_ns = int(self._last_capture_mono_ns or 0)
+        return {
+            "started_at_mono_ns": int(self.started_at_mono_ns),
+            "clock_mode": "unified_duplex",
+            "stream_samplerate": int(self.stream_samplerate),
+            "buffered_bytes": int(self.buffered_bytes),
+            "pending_chunk_count": int(self.pending_chunk_count),
+            "render_age_ms": int((now_ns - last_render_ns) / 1_000_000) if last_render_ns > 0 else -1,
+            "capture_age_ms": int((now_ns - last_capture_ns) / 1_000_000) if last_capture_ns > 0 else -1,
+            "rendered_samples": int(reference_stats.get("played_samples", 0) or 0),
+            "captured_samples": int(self._captured_samples),
+            "reference_available_samples": int(reference_stats.get("available_samples", 0) or 0),
+            "reference_callback_age_ms": int(reference_stats.get("callback_age_ms", -1) or -1),
+        }
 
 
 class VADMonitor:

@@ -7,6 +7,7 @@ from kajovochat.main import (
     _SERVER_VAD_THRESHOLD,
     _TTS_SPEED,
     _TTS_VOICE,
+    _backend_aware_aec_metrics,
     _should_drop_mic_chunk,
     ConversationWorker,
     run_audio_guard_selftest,
@@ -278,13 +279,13 @@ def test_conversation_worker_normalizes_aec_mode_from_settings() -> None:
     settings = AppSettings(audio_aec_mode="webrtc")
     worker = ConversationWorker(settings)
 
-    assert worker._aec_mode == "webrtc_preferred"
+    assert worker._aec_mode == "webrtc_apm"
 
 
-def test_webrtc_preferred_mode_relaxes_guard_thresholds() -> None:
-    worker = ConversationWorker(AppSettings(audio_aec_mode="webrtc_preferred"))
+def test_webrtc_apm_mode_relaxes_guard_thresholds() -> None:
+    worker = ConversationWorker(AppSettings(audio_aec_mode="webrtc_apm"))
     worker._guard_profile = dict(DEFAULT_AUDIO_GUARD_PROFILE)
-    worker._aec_mode = "webrtc_preferred"
+    worker._aec_mode = "webrtc_apm"
 
     worker._apply_aec_mode_policy()
 
@@ -293,8 +294,8 @@ def test_webrtc_preferred_mode_relaxes_guard_thresholds() -> None:
     assert worker._guard_profile["playback_activity_level"] <= DEFAULT_AUDIO_GUARD_PROFILE["playback_activity_level"]
 
 
-def test_webrtc_preferred_mode_keeps_far_drift_guardrails() -> None:
-    worker = ConversationWorker(AppSettings(audio_aec_mode="webrtc_preferred"))
+def test_webrtc_apm_mode_keeps_far_drift_guardrails() -> None:
+    worker = ConversationWorker(AppSettings(audio_aec_mode="webrtc_apm"))
     worker._guard_calibration = {"latency_samples": 722, "filter_length": 1024}
     worker._configure_aec_from_calibration()
 
@@ -303,10 +304,10 @@ def test_webrtc_preferred_mode_keeps_far_drift_guardrails() -> None:
         (np.random.default_rng(8).normal(0.0, 0.02, size=2400).astype(np.float32) * 32767.0).astype(np.int16),
         max_shift_samples=1400,
         expected_shift=722,
-        aec_mode="webrtc_preferred",
+        aec_mode="webrtc_apm",
     )
 
-    assert result["backend"] in {"custom", "webrtc"}
+    assert result["backend"] in {"degraded_no_aec", "webrtc"}
     assert result["webrtc_success"] in {True, False}
 
 
@@ -443,8 +444,8 @@ def test_runtime_latency_update_requires_repeated_stable_hits() -> None:
     assert worker._guard_calibration["latency_samples"] <= 540 + max(160, worker._aec.filter_length // 2)
 
 
-def test_webrtc_preferred_latency_update_commits_faster_than_custom() -> None:
-    worker = ConversationWorker(AppSettings(audio_aec_mode="webrtc_preferred"))
+def test_webrtc_apm_latency_update_commits_faster_than_custom() -> None:
+    worker = ConversationWorker(AppSettings(audio_aec_mode="webrtc_apm"))
     worker._guard_calibration = {"latency_samples": 540, "filter_length": 1024}
     worker._configure_aec_from_calibration()
 
@@ -591,3 +592,35 @@ def test_request_stop_stops_loop_before_clearing_rt() -> None:
     worker.request_stop()
 
     assert events[:2] == ["stop_loop", "close_rt"]
+
+
+def test_backend_aware_metrics_promote_successful_webrtc_block() -> None:
+    effective_similarity, effective_quality = _backend_aware_aec_metrics(
+        backend="webrtc",
+        similarity=0.18,
+        aec_quality=0.01,
+        improvement_ratio=0.82,
+        residual_level=0.0008,
+        output_level=0.08,
+        webrtc_success=True,
+        native_selected=False,
+    )
+
+    assert effective_similarity >= 0.42
+    assert effective_quality >= 0.12
+
+
+def test_backend_aware_metrics_promote_selected_windows_native_block() -> None:
+    effective_similarity, effective_quality = _backend_aware_aec_metrics(
+        backend="windows_native",
+        similarity=0.16,
+        aec_quality=0.02,
+        improvement_ratio=0.64,
+        residual_level=0.0009,
+        output_level=0.08,
+        webrtc_success=False,
+        native_selected=True,
+    )
+
+    assert effective_similarity >= 0.38
+    assert effective_quality >= 0.1

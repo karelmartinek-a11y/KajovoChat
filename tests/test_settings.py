@@ -10,6 +10,8 @@ from kajovochat.settings import (
     RESPONSE_STYLE_CHOICES,
     _promote_audio_aec_mode_for_installed_native_backend,
     build_system_prompt,
+    normalize_audio_device_mode,
+    normalize_audio_session_profile,
 )
 
 
@@ -76,7 +78,7 @@ def test_load_migrates_legacy_and_reduces_schema(monkeypatch) -> None:
         assert settings.answer_language_mode == "fixed"
         assert settings.fixed_answer_language == "cs"
         assert settings.response_style == "stručný"
-        assert settings.audio_aec_mode == "windows_native_preferred"
+        assert settings.audio_aec_mode == "windows_system_aec"
         assert not hasattr(settings, "temperature")
 
 
@@ -88,7 +90,7 @@ def test_audio_aec_mode_defaults_and_roundtrips(monkeypatch) -> None:
         config_path.write_text(
             json.dumps(
                 {
-                    "audio_aec_mode": "custom_only",
+                    "audio_aec_mode": "custom_lab",
                 },
                 ensure_ascii=False,
             ),
@@ -99,17 +101,17 @@ def test_audio_aec_mode_defaults_and_roundtrips(monkeypatch) -> None:
         monkeypatch.setattr("kajovochat.settings._config_dir", lambda: config_dir)
 
         settings = AppSettings.load()
-        assert settings.audio_aec_mode == "custom_only"
+        assert settings.audio_aec_mode == "custom_lab"
 
-        settings.audio_aec_mode = "webrtc_preferred"
+        settings.audio_aec_mode = "webrtc_apm"
         settings.save()
         reloaded = AppSettings.load()
-        assert reloaded.audio_aec_mode == "windows_native_preferred"
+        assert reloaded.audio_aec_mode == "webrtc_apm"
 
 
 def test_audio_aec_mode_normalizes_native_aliases() -> None:
     settings = AppSettings(audio_aec_mode="windows_native")
-    assert settings.audio_aec_mode == "windows_native_preferred"
+    assert settings.audio_aec_mode == "windows_system_aec"
 
 
 def test_audio_aec_mode_promotes_webrtc_when_native_driver_is_installed(monkeypatch) -> None:
@@ -122,10 +124,10 @@ def test_audio_aec_mode_promotes_webrtc_when_native_driver_is_installed(monkeypa
         lambda: DummyProbe(),
     )
 
-    assert _promote_audio_aec_mode_for_installed_native_backend("webrtc_preferred") == "windows_native_preferred"
+    assert _promote_audio_aec_mode_for_installed_native_backend("webrtc_preferred") == "windows_system_aec"
 
 
-def test_audio_aec_mode_keeps_custom_only_even_when_native_driver_is_installed(monkeypatch) -> None:
+def test_audio_aec_mode_keeps_custom_lab_even_when_native_driver_is_installed(monkeypatch) -> None:
     class DummyProbe:
         available = True
         installed_driver = True
@@ -135,7 +137,38 @@ def test_audio_aec_mode_keeps_custom_only_even_when_native_driver_is_installed(m
         lambda: DummyProbe(),
     )
 
-    assert _promote_audio_aec_mode_for_installed_native_backend("custom_only") == "custom_only"
+    assert _promote_audio_aec_mode_for_installed_native_backend("custom_lab") == "custom_lab"
+
+
+def test_audio_aec_mode_keeps_explicit_webrtc_apm_even_when_native_driver_is_installed(monkeypatch) -> None:
+    class DummyProbe:
+        available = True
+        installed_driver = True
+
+    monkeypatch.setattr(
+        "kajovochat.services.windows_native_aec.probe_windows_native_aec",
+        lambda: DummyProbe(),
+    )
+
+    assert _promote_audio_aec_mode_for_installed_native_backend("webrtc_apm") == "webrtc_apm"
+
+
+def test_audio_aec_mode_keeps_headset_clean_even_when_native_driver_is_installed(monkeypatch) -> None:
+    class DummyProbe:
+        available = True
+        installed_driver = True
+
+    monkeypatch.setattr(
+        "kajovochat.services.windows_native_aec.probe_windows_native_aec",
+        lambda: DummyProbe(),
+    )
+
+    assert _promote_audio_aec_mode_for_installed_native_backend("headset_clean") == "headset_clean"
+
+
+def test_audio_aec_mode_normalizes_headset_aliases() -> None:
+    settings = AppSettings(audio_aec_mode="no_aec_headset")
+    assert settings.audio_aec_mode == "headset_clean"
 
 
 def test_load_recovers_from_broken_settings_file(monkeypatch) -> None:
@@ -170,3 +203,28 @@ def test_audio_guard_profile_is_normalized() -> None:
     assert profile["echo_similarity_soft"] == 0.9
     assert profile["echo_similarity_drop"] >= profile["echo_similarity_soft"] + 0.04
     assert profile["server_vad_threshold"] == DEFAULT_AUDIO_GUARD_PROFILE["server_vad_threshold"]
+
+
+def test_audio_device_mode_and_session_profile_are_normalized() -> None:
+    settings = AppSettings(audio_device_mode="Laptop", audio_session_profile="DIAGnostic", audio_diagnostics_enabled=1)
+
+    assert settings.audio_device_mode == "notebook_builtin"
+    assert settings.audio_session_profile == "diagnostic"
+    assert settings.audio_diagnostics_enabled is True
+    assert normalize_audio_device_mode("dock") == "external_speakers"
+    assert normalize_audio_session_profile("lab") == "lab"
+    assert AppSettings(audio_aec_mode="headset").audio_aec_mode == "headset_clean"
+
+
+def test_audio_config_unknown_values_fall_back_to_safe_defaults() -> None:
+    settings = AppSettings(
+        audio_aec_mode="mystery-mode",
+        audio_device_mode="usb-dock-maybe",
+        audio_session_profile="nightly-chaos",
+        audio_diagnostics_enabled="",
+    )
+
+    assert settings.audio_aec_mode == "windows_system_aec"
+    assert settings.audio_device_mode == "auto"
+    assert settings.audio_session_profile == "production"
+    assert settings.audio_diagnostics_enabled is False

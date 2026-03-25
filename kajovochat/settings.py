@@ -64,7 +64,9 @@ DEFAULT_AUDIO_GUARD_PROFILE = {
     "barge_in_output_ratio": 1.35,
 }
 
-DEFAULT_AUDIO_AEC_MODE = "windows_native_preferred"
+DEFAULT_AUDIO_AEC_MODE = "windows_system_aec"
+DEFAULT_AUDIO_DEVICE_MODE = "auto"
+DEFAULT_AUDIO_SESSION_PROFILE = "production"
 
 
 def _config_dir() -> Path:
@@ -249,27 +251,74 @@ def normalize_response_style(value: str) -> str:
 
 def normalize_audio_aec_mode(value: str) -> str:
     normalized = (value or "").strip().lower()
-    if normalized in {"windows_native_preferred", "windows_native", "native", "native_preferred"}:
-        return "windows_native_preferred"
-    if normalized in {"webrtc_preferred", "hybrid"}:
-        return normalized
-    if normalized in {"webrtc", "webrtc_first", "webrtc-first"}:
-        return "webrtc_preferred"
-    if normalized in {"custom_only", "custom", "legacy"}:
-        return "custom_only"
+    if normalized in {"windows_system_aec", "windows_native_preferred", "windows_native", "native", "native_preferred"}:
+        return "windows_system_aec"
+    if normalized in {"webrtc_apm", "webrtc_preferred", "hybrid", "webrtc", "webrtc_first", "webrtc-first"}:
+        return "webrtc_apm"
+    if normalized in {
+        "headset_clean",
+        "headset_clean_mode",
+        "headset",
+        "headset_no_aec",
+        "headset_no_aec_mode",
+        "headset_only",
+        "no_aec_headset",
+        "no_aec_headset_mode",
+    }:
+        return "headset_clean"
+    if normalized in {"degraded_no_aec", "no_aec", "none", "disabled", "safe"}:
+        return "degraded_no_aec"
+    if normalized in {"custom_lab", "custom_only", "custom", "legacy"}:
+        return "custom_lab"
     return DEFAULT_AUDIO_AEC_MODE
 
 
+def normalize_audio_device_mode(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"auto", "automatic", "default", ""}:
+        return DEFAULT_AUDIO_DEVICE_MODE
+    if normalized in {"notebook_builtin", "notebook", "laptop", "builtin", "built-in"}:
+        return "notebook_builtin"
+    if normalized in {"wired_headset", "wired", "headset", "headphones"}:
+        return "wired_headset"
+    if normalized in {"bluetooth_headset", "bluetooth", "bt"}:
+        return "bluetooth_headset"
+    if normalized in {"external_speakers", "speakers", "dock", "hdmi"}:
+        return "external_speakers"
+    if normalized in {"external_headphones", "external_hp", "external-headphones"}:
+        return "external_headphones"
+    return DEFAULT_AUDIO_DEVICE_MODE
+
+
+def normalize_audio_session_profile(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"production", "prod", "safe", "default"}:
+        return DEFAULT_AUDIO_SESSION_PROFILE
+    if normalized in {"diagnostic", "diagnostics", "diag"}:
+        return "diagnostic"
+    if normalized in {"lab", "laboratory", "custom_lab"}:
+        return "lab"
+    return DEFAULT_AUDIO_SESSION_PROFILE
+
+
 def _promote_audio_aec_mode_for_installed_native_backend(current_mode: str) -> str:
+    raw_value = (current_mode or "").strip().lower()
     normalized = normalize_audio_aec_mode(current_mode)
-    if normalized != "webrtc_preferred":
+    legacy_promotable_values = {
+        "webrtc_preferred",
+        "hybrid",
+        "webrtc",
+        "webrtc_first",
+        "webrtc-first",
+    }
+    if normalized != "webrtc_apm" or raw_value not in legacy_promotable_values:
         return normalized
     try:
         from .services.windows_native_aec import probe_windows_native_aec
 
         probe = probe_windows_native_aec()
         if probe.available and probe.installed_driver:
-            return "windows_native_preferred"
+            return "windows_system_aec"
     except Exception:
         pass
     return normalized
@@ -300,9 +349,15 @@ class AppSettings:
     audio_guard_profile: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_AUDIO_GUARD_PROFILE))
     audio_guard_calibration: dict[str, object] = field(default_factory=dict)
     audio_aec_mode: str = DEFAULT_AUDIO_AEC_MODE
+    audio_device_mode: str = DEFAULT_AUDIO_DEVICE_MODE
+    audio_session_profile: str = DEFAULT_AUDIO_SESSION_PROFILE
+    audio_diagnostics_enabled: bool = False
 
     def __post_init__(self) -> None:
         self.audio_aec_mode = normalize_audio_aec_mode(self.audio_aec_mode)
+        self.audio_device_mode = normalize_audio_device_mode(self.audio_device_mode)
+        self.audio_session_profile = normalize_audio_session_profile(self.audio_session_profile)
+        self.audio_diagnostics_enabled = bool(self.audio_diagnostics_enabled)
 
     @property
     def openai_api_key(self) -> str:
@@ -383,6 +438,9 @@ class AppSettings:
         settings.response_style = normalize_response_style(settings.response_style)
         original_aec_mode = settings.audio_aec_mode
         settings.audio_aec_mode = _promote_audio_aec_mode_for_installed_native_backend(settings.audio_aec_mode)
+        settings.audio_device_mode = normalize_audio_device_mode(settings.audio_device_mode)
+        settings.audio_session_profile = normalize_audio_session_profile(settings.audio_session_profile)
+        settings.audio_diagnostics_enabled = bool(settings.audio_diagnostics_enabled)
         if not isinstance(settings.audio_guard_profile, dict):
             settings.audio_guard_profile = dict(DEFAULT_AUDIO_GUARD_PROFILE)
         else:

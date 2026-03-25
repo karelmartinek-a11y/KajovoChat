@@ -2,3 +2,6 @@ LIBRARY kajovochat_windows_apo
 EXPORTS
     DllGetClassObject
     DllCanUnloadNow
+    kajovochat_apo_capture_create
+    kajovochat_apo_capture_destroy
+    kajovochat_apo_capture_process

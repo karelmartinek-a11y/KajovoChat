@@ -75,8 +75,8 @@ pytest -q
 Aktualni audio stack pouziva kombinaci:
 
 - vlastniho guardu a telemetrie v `kajovochat/main.py`
-- nativni windows helper cesty `windows_native_preferred`, pokud je dostupna DLL
-- pripravene APO helper cesty `windows_native_preferred`, pokud je dostupna DLL
+- nativni windows helper cesty `windows_system_aec`, pokud je dostupna DLL
+- pripravene APO helper cesty `windows_system_aec`, pokud je dostupna DLL
 - vlastniho adaptivniho AEC v `kajovochat/services/audio_service.py`
 - volitelneho backendu `aec-audio-processing` pro WebRTC AEC cisteni vhodnych echo-only bloku
 
@@ -100,6 +100,26 @@ Prakticka interpretace:
 - vysoke `avg_delay_error` znamena nestabilni runtime latenci
 
 Aktualni stav projektu je prakticky pouzitelny, ale stale nejde o plne stabilni OS-level AEC. Dalsi ladeni ma smysl delat podle realnych session logu, ne naslepo.
+
+## Session log troubleshooting
+
+Session `.jsonl` log je teď primární zdroj pravdy pro notebookovou hlasovou relaci. Při ladění jedné relace sledujte minimálně:
+
+- `audio_session_state` – lifecycle relace (`starting` → `probing` → `active` / `degraded` / `recovering`)
+- `audio_backend_selected` – požadovaný a skutečně aktivní backend
+- `audio_backend_fallback` – řízený přechod na další backend v chainu
+- `audio_reference_health` – stav playback reference pipeline
+- `reconnect_*` – transport recovery
+- `aec_diag` a `aec_summary` – block-level DSP diagnostika
+
+Bezpečný default konfigurace je:
+
+- `audio_aec_mode=windows_system_aec`
+- `audio_device_mode=auto`
+- `audio_session_profile=production`
+- `audio_diagnostics_enabled=false`
+
+Diagnostické přepínače jsou oddělené od produkčních režimů. `custom_lab` je explicitní laboratorní mód, ne běžná produkční cesta.
 
 ## Build pro macOS
 

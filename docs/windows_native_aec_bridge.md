@@ -1,61 +1,112 @@
 # Windows native AEC bridge
 
-Datum: 2026-03-23
+Datum: 2026-03-25
 
 ## Cíl
 
-Připravit první volbu pro AEC na Windows tak, aby aplikace mohla využít
-nativní capture pipeline nebo helper postavený nad Windows audio stackem.
+Držet `windows_system_aec` jako první produkční volbu pro notebookový audio stack na Windows a současně mít auditovatelný fallback chain bez návratu k původnímu hybridnímu chaosu.
 
-Současný stav je hybridní:
+## Aktuální produkční policy
 
-- `windows_native_preferred` je výchozí režim
-- pokud není nativní helper dostupný, runtime padá na `webrtc_preferred`
-- `custom_only` zůstává poslední nouzová cesta
+Kanonický produkční chain je nyní:
 
-## Co je připravené v Pythonu
+1. `windows_system_aec`
+2. `webrtc_apm`
+3. `degraded_no_aec`
 
-V repozitáři už existuje tenká adapter vrstva:
+`custom_lab` zůstává laboratorní režim a není součástí produkční notebookové cesty.
 
-- [`kajovochat/services/windows_native_aec.py`](../kajovochat/services/windows_native_aec.py)
-- detekce helperu přes `KAJOVOCHAT_WINDOWS_AEC_DLL`
-- přepínání backendů podle `audio_aec_mode`
-- fallback na WebRTC, pokud helper není dostupný
+## Co je v repozitáři
 
-Současně je v repozitáři připraven i zdrojový skeleton helperu:
+Python bridge a probe vrstva:
 
-- [`native/windows_aec_helper/`](../native/windows_aec_helper/)
-- [`native/windows_apo_helper/`](../native/windows_apo_helper/)
-- CMake projekt pro DLL
-- VS Code tasky pro konfiguraci a build
-- stub exporty se stejným C ABI, jaký očekává Python bridge
+- [`C:\GitHub\KajovoChat\kajovochat\services\windows_native_aec.py`](C:\GitHub\KajovoChat\kajovochat\services\windows_native_aec.py)
+- detekce helperu přes `KAJOVOCHAT_WINDOWS_AEC_DLL` a `KAJOVOCHAT_WINDOWS_APO_DLL`
+- detekce nainstalovaného APO driveru přes `pnputil`
+- session-level použití přes `AudioSessionManager` a `WindowsSystemAecBackendRunner`
 
-## Očekávaný nativní helper
+Nativní helpery:
 
-Helper DLL má být samostatná Windows binárka. Python část očekává tyto symboly:
+- [`C:\GitHub\KajovoChat\native\windows_aec_helper\`](C:\GitHub\KajovoChat\native\windows_aec_helper\)
+- [`C:\GitHub\KajovoChat\native\windows_apo_helper\`](C:\GitHub\KajovoChat\native\windows_apo_helper\)
+
+## Aktuální nativní kontrakty
+
+Repo drží dvě nativní cesty:
+
+- `kajovochat_aec_*`
+  - reference-based helper kontrakt pro klasický native AEC běh
+- `kajovochat_apo_capture_*`
+  - capture-only kontrakt pro APO větev bez app-level playback reference
+
+Python bridge při dostupném APO driveru preferuje `kajovochat_apo_capture_*`. Pokud capture symboly nejsou k dispozici, spadne se na `kajovochat_aec_*`.
+
+## Session-oriented Python API
+
+Bridge už nevystavuje jen per-frame `process(...)`, ale i session kontrakt:
+
+- `WindowsNativeAECSessionConfig`
+- `WindowsNativeAECSession.start()`
+- `WindowsNativeAECSession.write_render_frame(frame)`
+- `WindowsNativeAECSession.submit_capture_frame(raw_mic_pcm16, mono_ns, stream_delay_ms, render_ref_pcm16=None)`
+- `WindowsNativeAECSession.read_capture_frame(timeout_ms)`
+- `WindowsNativeAECSession.get_health_snapshot()`
+- `WindowsNativeAECSession.stop()`
+- `WindowsNativeAECSession.close()`
+
+Tento kontrakt vrací explicitní [`CaptureFrame`](C:\GitHub\KajovoChat\kajovochat\audio\contracts.py) a health snapshot místo toho, aby produkční `windows_system_aec` sahal přímo na holý buffer procesor.
+
+## Očekávané ABI helperu
+
+Reference-based helper:
 
 - `kajovochat_aec_create(int samplerate, int filter_length, int max_shift_samples) -> void*`
 - `kajovochat_aec_destroy(void* handle)`
 - `kajovochat_aec_process(void* handle, mic, mic_samples, reference, reference_samples, delay_ms, out_pcm, out_capacity, out_quality, out_improvement, out_residual, out_is_strong) -> int`
 
-Helper v repozitáři už existuje jako první time-domain NLMS prototyp a vedle
-něj je připraven i APO skeleton s totožným ABI. Není to hotový systémový APO,
-ale je to skutečně funkční echo canceler s pevným C ABI, který se dá dále
-vylepšovat bez změny Python bridge.
+APO capture kontrakt:
 
-## Fázování
+- `kajovochat_apo_capture_create(int samplerate) -> void*`
+- `kajovochat_apo_capture_destroy(void* handle)`
+- `kajovochat_apo_capture_process(void* handle, mic, mic_samples, out_pcm, out_capacity, out_quality, out_voice_likelihood, out_processing_flags) -> int`
 
-1. Přepnout default do `windows_native_preferred`.
-2. Připravit nativní bridge a detekci helperu.
-3. Používat helper jako první backend, fallback na WebRTC.
-4. Měřit backend zvlášť v `aec_diag` a `aec_summary`.
-5. Dlouhodobě vyhodnotit, zda je nativní helper stabilnější než WebRTC fallback.
+## Jak to číst v logu
 
-## Praktický závěr
+Pro audit jedné relace sleduj hlavně:
 
-Tahle vrstva je nyní připravená na nativní Windows AEC a repozitář už obsahuje
-první funkční helper prototyp i samostatný APO skeleton. Není to systémový APO,
-ale už to není jen skelet: helper umí skutečné echo potlačení a zachovává
-stabilní rozhraní pro další růst.
+- `audio_backend_selected`
+- `audio_backend_fallback`
+- `audio_reference_health`
+- `audio_session_state`
+- `reconnect_scheduled`
+- `reconnect_ok`
+- `recovery_exhausted`
+- `aec_diag`
 
-Pro build helperu je potřeba mit nainstalovane CMake, MSVC/Visual Studio Build Tools a Windows SDK.
+Kanonické rozhodnutí o backendu je v session telemetrii přes:
+
+- `requested_backend`
+- `selected_backend`
+- `fallback_reason`
+- `degradation_cause`
+
+`aec_diag` je block-level diagnostika, ne session-level zdroj pravdy.
+
+## Poctivý stav
+
+Bridge je dnes výrazně dál než původní per-buffer experiment:
+
+- má session-oriented Python API
+- umí použít APO capture kontrakt
+- `windows_system_aec` je napojený jako produkční backend
+
+Pořád ale platí, že jde o helper-backed systémovou cestu. Pokud bude cílem úplně čistý systémový backend bez mezivrstvy, další krok už bude hlubší nativní integrace mimo současný DLL bridge.
+
+## Build požadavky
+
+Pro build helperů je potřeba:
+
+- CMake
+- MSVC / Visual Studio Build Tools
+- Windows SDK
+- pro release packaging také `Inf2Cat` a `signtool`

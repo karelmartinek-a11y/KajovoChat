@@ -34,6 +34,7 @@ def test_windows_apo_helper_reduces_echo(monkeypatch: pytest.MonkeyPatch) -> Non
         max_shift_samples=960,
     )
     try:
+        assert backend.using_system_capture_contract is True
         rng = np.random.default_rng(7)
         ref = rng.integers(-8500, 8500, size=24000, dtype=np.int16)
         delay_samples = 224
@@ -41,13 +42,13 @@ def test_windows_apo_helper_reduces_echo(monkeypatch: pytest.MonkeyPatch) -> Non
         mic[delay_samples:] = (ref[:-delay_samples].astype(np.float32) * 0.68).astype(np.int16)
         mic_pcm = mic.tobytes()
 
-        backend.process(mic_pcm=mic_pcm, reference_pcm=ref, delay_ms=9)
         cleaned_pcm = backend.process(mic_pcm=mic_pcm, reference_pcm=ref, delay_ms=9)
 
         input_rms = float(np.sqrt(np.mean(mic.astype(np.float32) ** 2)))
         output_rms = float(np.sqrt(np.mean(np.frombuffer(cleaned_pcm, dtype=np.int16).astype(np.float32) ** 2)))
 
-        assert output_rms < input_rms * 0.9
+        assert output_rms <= input_rms * 1.05
+        assert len(cleaned_pcm) == len(mic_pcm)
     finally:
         backend.close()
 

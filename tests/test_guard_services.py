@@ -401,3 +401,56 @@ def test_windows_native_preferred_keeps_native_when_webrtc_is_only_marginally_be
     assert result["native_attempted"] is True
     assert result["native_selected"] is True
     assert result["backend"] == "windows_native"
+
+
+def test_production_webrtc_mode_falls_back_to_degraded_instead_of_custom_output() -> None:
+    samplerate = 24000
+    rng = np.random.default_rng(7)
+    total = 8000
+    chunk_size = 960
+    true_shift = 220
+    reference = rng.normal(0.0, 0.22, size=total).astype(np.float32)
+    direct = reference[-(chunk_size + true_shift) : -true_shift]
+    mic = np.clip(0.62 * direct + rng.normal(0.0, 0.01, size=chunk_size), -1.0, 1.0)
+
+    canceller = AdaptiveEchoCanceller(samplerate=samplerate, filter_length=1024, max_shift_samples=1200)
+    canceller._windows_native_probe = SimpleNamespace(available=False)
+    canceller._external_backend = None
+    canceller._ridge_candidate = lambda design, target, ridge=None: (
+        np.zeros((design.shape[1],), dtype=np.float32),
+        np.zeros((target.shape[0],), dtype=np.float32),
+    )
+    canceller._nlms_candidate = lambda design, target, iterations, initial_weights=None: (
+        np.zeros((design.shape[1],), dtype=np.float32),
+        np.zeros((target.shape[0],), dtype=np.float32),
+    )
+
+    result = canceller.process(
+        (mic * 32767.0).astype(np.int16).tobytes(),
+        (reference * 32767.0).astype(np.int16),
+        max_shift_samples=1200,
+        expected_shift=true_shift,
+        aec_mode="webrtc_apm",
+    )
+
+    assert result["backend"] == "webrtc"
+    assert result["selection_reason"] == "webrtc_no_gain"
+
+
+def test_windows_system_aec_with_installed_apo_uses_system_capture_path() -> None:
+    canceller = AdaptiveEchoCanceller(samplerate=24000, filter_length=512, max_shift_samples=960)
+    canceller._windows_native_probe = SimpleNamespace(available=True, installed_driver=True)
+
+    mic = (np.random.default_rng(11).normal(0.0, 0.03, size=960).astype(np.float32) * 32767.0).astype(np.int16)
+    result = canceller.process(
+        mic.tobytes(),
+        np.zeros((0,), dtype=np.int16),
+        max_shift_samples=960,
+        expected_shift=480,
+        aec_mode="windows_system_aec",
+    )
+
+    assert result["backend"] == "windows_system_capture"
+    assert result["native_attempted"] is True
+    assert result["native_selected"] is True
+    assert result["selection_reason"] == "windows_system_capture"

@@ -1,56 +1,61 @@
 # Audio AEC Runtime
 
-## Aktualni stav
+## Produkční backend policy
 
-Aktualni audio stack kombinuje:
+Produkční relace už nepoužívá neřízený hybrid několika AEC strategií. Session policy je pevná:
 
-- vlastni guard a telemetrii v `kajovochat/main.py`
-- vlastni adaptivni AEC fallback v `kajovochat/services/audio_service.py`
-- volitelny backend `aec-audio-processing` pro WebRTC AEC cisteni vhodnych echo-only bloku
+1. `windows_system_aec`
+2. `webrtc_apm`
+3. `degraded_no_aec`
 
-Na realnem HW uz logy potvrzuji opakovane funkcni echo odeect. Nejde ale jeste o plne stabilni reseni napric celou relaci.
+`custom_lab` je pouze laboratorní režim. Slouží pro DSP experimenty, regresní testy a analýzu reference pipeline, ne jako produkční default.
 
-## Co se ted pouziva
+## Kde se co rozhoduje
 
-- Timestampovane mic chunky
-- Playback reference podle casu capture chunku
-- Kratky cache fallback na posledni dobre reference okno
-- Stabilizace runtime latence hysterzi
-- `webrtc_success` signal pro bloky, kde WebRTC backend realne pomohl
+- `AudioSessionManager` drží session policy, backend probing a lifecycle
+- `AecEngine` drží backend chain pro zvolený policy mode
+- `AdaptiveEchoCanceller` provádí block-level DSP čištění a guard diagnostiku
+- `RecoverySupervisor` řídí reconnect, fallback a anti-oscillation guard
 
-## Co sledovat v session logu
+## Session logy
 
-Hlavni zdroj je session `.jsonl` log v adresari logu aplikace. Pro kazdou relaci jsou nejdulezitejsi zaznamy `aec_diag` a `aec_summary`.
+Hlavním zdrojem jsou session `.jsonl` logy. Pro audio diagnostiku sleduj hlavně:
 
-Klicove metriky:
+- `audio_session_state`
+- `audio_backend_selected`
+- `audio_backend_fallback`
+- `audio_reference_health`
+- `aec_diag`
+- `aec_summary`
+- `reconnect_scheduled`
+- `reconnect_ok`
+- `reconnect_failed`
+- `echo_guard`
 
-- `reference_miss_ratio`
-- `reference_ready_ratio`
-- `aligned_ratio`
-- `strong_alignment_ratio`
-- `avg_quality_when_aligned`
-- `avg_delay_error`
-- `backend`
-- `ws`
+## Důležité telemetrické položky
 
-## Prakticka interpretace
+- `requested_backend`
+- `selected_backend`
+- `fallback_reason`
+- `device_fingerprint`
+- `session_timing`
+- `reference.ready`
+- `reference.health`
+- `degradation_cause`
+- `recovery_attempts`
 
-- Vysoke `reference_miss_ratio` znamena problem v reference pipeline.
-- Nizke `aligned_ratio` znamena problem v coarse delay nebo alignment vrstve.
-- `backend=webrtc` a `ws=on` znamena, ze WebRTC backend blok realne vycistil.
-- Nizky `residual` a vysoke `improve` znamenaji funkcni echo odeect.
-- Vysoke `avg_delay_error` znamena nestabilni runtime latenci.
+## Interpretace
 
-## Soucasne zname limity
+`selected_backend=windows_system_aec` znamená, že relace běží v preferovaném produkčním režimu. Pokud není systémový backend dostupný nebo reference pipeline dlouhodobě selhává, relace přejde řízeně na `webrtc_apm`, případně až na `degraded_no_aec`.
 
-- V casti relace se porad objevuje `reference_miss`.
-- Alignment neni stabilni na vsech blocich.
-- Double-talk ochrana je funkcni v testech, ale na realnem HW zatim nebyla ve vetsim mnozstvi logu potvrzena.
-- Reseni je vyrazne lepsi nez puvodni stav, ale stale nejde o plne systemovy AEC engine.
+`backend=custom` v `aec_diag` se má objevovat pouze v explicitním `custom_lab` režimu. Produkční relace se auditují přes session logy: `requested_backend`, `selected_backend`, `fallback_reason`, `degradation_cause` a `backend_chain`.
 
-## Doporuceny dalsi postup
+## Praktický postup ladění
 
-1. Sbirat dalsi realne session logy z bezneho pouzivani.
-2. Doladovat reference pipeline podle `reference_miss_ratio`.
-3. Doladovat guard fallback podle bloku s `backend=webrtc` a `ws=on`.
-4. Dalsi velke DSP refaktory delat az pokud se reference pipeline stabilizuje a stale zustane nizke `avg_quality_when_aligned`.
+1. Otevři `.jsonl` log jedné relace.
+2. Najdi první `audio_backend_selected` a ověř `requested_backend` vs. `selected_backend`.
+3. Pokud došlo k propadu, hledej `audio_backend_fallback` a `fallback_reason`.
+4. Zkontroluj `audio_reference_health` a `aec_diag`, zda byla reference skutečně ready.
+5. Teprve potom vyhodnocuj `aec_summary`.
+
+Tak je možné z jediné relace jednoznačně rekonstruovat, co se stalo: jaký backend byl požadován, který byl skutečně aktivní, proč došlo k fallbacku a zda šlo o degradaci kvůli reference pipeline nebo kvůli transportu.
