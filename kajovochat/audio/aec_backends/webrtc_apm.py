@@ -69,7 +69,7 @@ class WebRtcApmBackendRunner:
                 prefer_external = False
             if prep.anchor_shift > 0 and prep.shift_error > max(240, int(getattr(owner, "_filter_length")) // 3) and prep.voice_likelihood >= 0.55:
                 prefer_external = False
-            if context.prefer_native_mode and context.backend_used == "windows_native":
+            if context.prefer_native_mode and context.backend_used == "windows_system_aec":
                 prefer_external = bool(
                     external_improvement >= context.improvement_ratio + 0.35
                     or (

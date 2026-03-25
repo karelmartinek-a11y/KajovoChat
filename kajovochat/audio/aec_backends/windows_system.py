@@ -94,7 +94,7 @@ class WindowsSystemAecBackendRunner:
                 improvement_ratio=float(native_improvement),
                 predicted_level=max(float(context.predicted_level), float(native_predicted_level)),
                 delay_samples=int(prep.best_shift),
-                backend=str(native_frame.aec_backend or "windows_native"),
+                backend="windows_system_aec",
                 webrtc_success=bool(native_strong),
                 native_attempted=True,
                 native_selected=True,

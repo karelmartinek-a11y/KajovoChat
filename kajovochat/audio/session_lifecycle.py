@@ -25,7 +25,7 @@ class ConversationAudioLifecycle:
             return
         owner._captions = ""
         owner.captions_updated.emit(owner._captions)
-        owner._transport_runtime.reset()
+        owner._session_manager.reset_runtime_tracking()
         owner._audio_observer.reset_aec_diag()
         owner._session_manager.reset_voice_gate_runtime()
         owner._guard_telemetry = GuardTelemetry()

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..services.openai_service import OpenAIService
-from ..services.audio_service import AudioPlayer
+from ..audio.io import AudioPlayer
 
 _DEFAULT_TEXT = {
     "cs": "Ahoj, tady je ukázka vybraného hlasu. Jak vám mohu pomoci?",

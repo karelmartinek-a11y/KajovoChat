@@ -29,31 +29,25 @@ from PySide6.QtWidgets import (
 from .settings import (
     AppSettings,
     DEFAULT_AUDIO_GUARD_PROFILE,
-    build_system_prompt,
     normalize_audio_aec_mode,
     normalize_audio_device_mode,
 )
-from .audio.voice_gate import backend_aware_aec_metrics as _backend_aware_aec_metrics_impl
-from .audio.voice_gate import evaluate_capture_gate as _evaluate_capture_gate_impl
-from .audio.voice_gate import VoiceGateRuntimeState
+from .audio.voice_gate import backend_aware_aec_metrics as _backend_aware_aec_metrics
 from .audio.bootstrap import build_conversation_audio_stack
 from .audio.runtime_resources import AudioRuntimeResources
 from .audio.selftest import run_audio_guard_selftest as _run_audio_guard_selftest_impl
 from .dialogs.settings_dialog import SettingsDialog
-from .services.audio_service import (
-    AdaptiveEchoCanceller,
-    AudioPlayer,
-    DuplexAudioSession,
-    RealtimeMicStream,
+from .audio.devices import (
     build_device_fingerprint,
-    pick_audio_device,
+    calibrate_audio_devices_advanced,
     format_device_help,
     list_audio_devices,
-    calibrate_audio_devices_advanced,
-    suppress_echo_from_pcm16,
+    pick_audio_device,
 )
-from .services.windows_native_aec import probe_windows_native_aec
-from .services.realtime_service import RealtimeConfig, RealtimeService
+from .audio.dsp_helpers import AdaptiveEchoCanceller, suppress_echo_from_pcm16
+from .audio.io import DuplexAudioSession
+from .audio.windows_system_aec import probe_windows_system_aec
+from .services.realtime_service import RealtimeService
 from .services.log_service import RealtimeLogWriter
 from .services.app_logging import install_app_logging
 from .services.guard_adaptation import GuardAdaptor
@@ -156,83 +150,6 @@ def _pcm16_echo_similarity(mic_pcm: bytes, reference: object) -> float:
         return 0.0
 
 
-def _should_drop_mic_chunk(
-    *,
-    mode: str,
-    guard_active: bool,
-    playback_active: bool,
-    similarity: float,
-    input_level: float,
-    output_level: float,
-    profile: Optional[dict[str, float]] = None,
-    residual_level: Optional[float] = None,
-    voice_likelihood: float = 0.0,
-    double_talk: bool = False,
-    aec_quality: float = 0.0,
- ) -> tuple[bool, str]:
-    decision = _evaluate_capture_gate_impl(
-        mode=mode,
-        guard_active=guard_active,
-        playback_active=playback_active,
-        similarity=similarity,
-        input_level=input_level,
-        output_level=output_level,
-        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
-        profile=profile,
-        residual_level=residual_level,
-        voice_likelihood=voice_likelihood,
-        double_talk=double_talk,
-        aec_quality=aec_quality,
-    )
-    return bool(decision.drop_chunk), str(decision.drop_reason)
-
-
-def _backend_aware_aec_metrics(
-    *,
-    backend: str,
-    similarity: float,
-    aec_quality: float,
-    improvement_ratio: float,
-    residual_level: float,
-    output_level: float,
-    webrtc_success: bool,
-    native_selected: bool,
-) -> tuple[float, float]:
-    """Vrací efektivní similarity a kvalitu pro downstream guard/latency logiku."""
-    effective_similarity = float(similarity)
-    effective_quality = float(aec_quality)
-    if backend == "webrtc":
-        effective_similarity = max(
-            effective_similarity,
-            0.42 if webrtc_success else 0.0,
-            min(0.72, float(improvement_ratio) * 0.9),
-        )
-        effective_quality = max(
-            effective_quality,
-            0.12 if webrtc_success else 0.0,
-            min(0.35, float(improvement_ratio) * 0.45),
-        )
-    elif backend == "windows_native":
-        effective_similarity = max(
-            effective_similarity,
-            0.38 if native_selected else 0.0,
-            min(0.68, float(improvement_ratio) * 0.82),
-        )
-        effective_quality = max(
-            effective_quality,
-            0.1 if native_selected else 0.0,
-            min(0.32, float(improvement_ratio) * 0.4),
-        )
-    elif backend == "windows_system_capture":
-        effective_similarity = max(effective_similarity, 0.35 if native_selected else 0.22)
-        effective_quality = max(effective_quality, 0.18 if native_selected else 0.08)
-    if residual_level <= max(0.0012, output_level * 0.02):
-        effective_quality = max(effective_quality, 0.1)
-    return float(effective_similarity), float(effective_quality)
-
-
-_backend_aware_aec_metrics = _backend_aware_aec_metrics_impl
-
 
 def run_audio_guard_selftest() -> dict[str, object]:
     return _run_audio_guard_selftest_impl(
@@ -273,7 +190,7 @@ class ConversationWorker(QObject):
         self._guard_learning_until = 0.0
         self._guard_aec_aware = False
         self._aec_mode = normalize_audio_aec_mode(self.settings.audio_aec_mode)
-        self._native_aec_probe = probe_windows_native_aec()
+        self._native_aec_probe = probe_windows_system_aec()
         self._session_log_dir: Optional[Path] = None
         self._session_name: str = ""
         self._input_device_name = "default"
@@ -285,29 +202,17 @@ class ConversationWorker(QObject):
         self._captions = ""
         self._logger: Optional[RealtimeLogWriter] = None
         self._runtime_resources = AudioRuntimeResources()
-        self._duplex: Optional[DuplexAudioSession] = None
-        self._player: Optional[AudioPlayer] = None
         self._aec = AdaptiveEchoCanceller(samplerate=24000)
         self._resolved_input_device: Optional[int] = None
         self._resolved_output_device: Optional[int] = None
 
-        self._rt: Optional[RealtimeService] = None
-
-        self._mic: Optional[RealtimeMicStream] = None
-        self._mic_enabled = threading.Event()
-
         self._mode: str = "idle"  # "handsfree" | "ptt" | "idle"
-        self._resolved_lang = "cs"
-        self._rt_turn_mode = "server_vad"
-        self._bootstrap_voice_gate_runtime = VoiceGateRuntimeState()
-
         # Level signals are throttled to avoid saturating the Qt event loop.
         self._last_in_level: float = 0.0
         self._last_out_level: float = 0.0
         self._last_level_emit_t: float = 0.0
 
         # True while waiting for server transcription completion.
-        self._awaiting_transcript = False
 
         # Best-effort current UI state.
         self._ui_state = _STATE_IDLE
@@ -315,14 +220,10 @@ class ConversationWorker(QObject):
         audio_stack = build_conversation_audio_stack(
             self,
             estimate_voice_likelihood_from_pcm16=estimate_voice_likelihood_from_pcm16,
-            evaluate_capture_gate=_evaluate_capture_gate_impl,
             backend_aware_aec_metrics=_backend_aware_aec_metrics,
             closed_pose_factory=_closed_pose_snapshot,
-            build_system_prompt_fn=build_system_prompt,
             sanitize_text_fn=_sanitize_text,
             format_device_help_fn=format_device_help,
-            realtime_factory=RealtimeService,
-            realtime_config_cls=RealtimeConfig,
             allowed_langs=_ALLOWED_LANGS,
             realtime_model=_REALTIME_MODEL,
             tts_voice=_TTS_VOICE,
@@ -333,199 +234,17 @@ class ConversationWorker(QObject):
             server_vad_threshold=_SERVER_VAD_THRESHOLD,
             state_speaking=_STATE_SPEAKING,
             state_error=_STATE_ERROR,
-            state_thinking=_STATE_THINKING,
-            state_listening=_STATE_LISTENING,
-            state_transcribing=_STATE_TRANSCRIBING,
             state_idle=_STATE_IDLE,
-            state_connecting=_STATE_CONNECTING,
-            state_reconnecting=_STATE_RECONNECTING,
             echo_trailing_hold_s=_ECHO_TRAILING_HOLD_S,
-            default_guard_profile=DEFAULT_AUDIO_GUARD_PROFILE,
             normalize_aec_mode=normalize_audio_aec_mode,
         )
         self._rt_runtime_controller = audio_stack.runtime_controller
-        self._audio_callbacks = audio_stack.callbacks
-        self._transport_runtime = audio_stack.callbacks.runtime_state
         self._audio_lifecycle = audio_stack.lifecycle
         self._audio_observer = audio_stack.observer
         self._audio_policy = audio_stack.policy
         self._audio_controls = audio_stack.controls
         self._session_manager = audio_stack.session_manager
-        self._mic_enabled = audio_stack.mic_enabled
 
-    @property
-    def _rt(self) -> Optional[RealtimeService]:
-        return self._runtime_resources.rt
-
-    @_rt.setter
-    def _rt(self, value: Optional[RealtimeService]) -> None:
-        self._runtime_resources.rt = value
-
-    @property
-    def _duplex(self) -> Optional[DuplexAudioSession]:
-        return self._runtime_resources.duplex
-
-    @_duplex.setter
-    def _duplex(self, value: Optional[DuplexAudioSession]) -> None:
-        self._runtime_resources.duplex = value
-
-    @property
-    def _mic(self) -> Optional[RealtimeMicStream]:
-        return self._runtime_resources.mic
-
-    @_mic.setter
-    def _mic(self, value: Optional[RealtimeMicStream]) -> None:
-        self._runtime_resources.mic = value
-
-    @property
-    def _player(self) -> Optional[AudioPlayer]:
-        return self._runtime_resources.player
-
-    @_player.setter
-    def _player(self, value: Optional[AudioPlayer]) -> None:
-        self._runtime_resources.player = value
-
-    def _voice_gate_runtime(self) -> VoiceGateRuntimeState:
-        session_manager = getattr(self, "_session_manager", None)
-        if session_manager is not None:
-            return session_manager.voice_gate_runtime
-        return self._bootstrap_voice_gate_runtime
-
-    @property
-    def _reconnect_attempts(self) -> int:
-        return int(self._transport_runtime.reconnect_attempts)
-
-    @_reconnect_attempts.setter
-    def _reconnect_attempts(self, value: int) -> None:
-        self._transport_runtime.reconnect_attempts = int(value)
-
-    @property
-    def _next_reconnect_at(self) -> float:
-        return float(self._transport_runtime.next_reconnect_at)
-
-    @_next_reconnect_at.setter
-    def _next_reconnect_at(self, value: float) -> None:
-        self._transport_runtime.next_reconnect_at = float(value)
-
-    @property
-    def _response_started_at(self) -> Optional[float]:
-        return self._transport_runtime.response_started_at
-
-    @_response_started_at.setter
-    def _response_started_at(self, value: Optional[float]) -> None:
-        self._transport_runtime.response_started_at = value
-
-    @property
-    def _response_first_audio_at(self) -> Optional[float]:
-        return self._transport_runtime.response_first_audio_at
-
-    @_response_first_audio_at.setter
-    def _response_first_audio_at(self, value: Optional[float]) -> None:
-        self._transport_runtime.response_first_audio_at = value
-
-    @property
-    def _speech_stopped_at(self) -> Optional[float]:
-        return self._transport_runtime.speech_stopped_at
-
-    @_speech_stopped_at.setter
-    def _speech_stopped_at(self, value: Optional[float]) -> None:
-        self._transport_runtime.speech_stopped_at = value
-
-    @property
-    def _last_server_activity_at(self) -> float:
-        return float(self._transport_runtime.last_server_activity_at)
-
-    @_last_server_activity_at.setter
-    def _last_server_activity_at(self, value: float) -> None:
-        self._transport_runtime.last_server_activity_at = float(value)
-
-    @property
-    def _mic_suppressed_until(self) -> float:
-        return float(self._voice_gate_runtime().mic_suppressed_until)
-
-    @_mic_suppressed_until.setter
-    def _mic_suppressed_until(self, value: float) -> None:
-        self._voice_gate_runtime().mic_suppressed_until = float(value)
-
-    @property
-    def _echo_drop_count(self) -> int:
-        return int(self._voice_gate_runtime().echo_drop_count)
-
-    @_echo_drop_count.setter
-    def _echo_drop_count(self, value: int) -> None:
-        self._voice_gate_runtime().echo_drop_count = int(value)
-
-    @property
-    def _barge_in_chunk_count(self) -> int:
-        return int(self._voice_gate_runtime().barge_in_chunk_count)
-
-    @_barge_in_chunk_count.setter
-    def _barge_in_chunk_count(self, value: int) -> None:
-        self._voice_gate_runtime().barge_in_chunk_count = int(value)
-
-    @property
-    def _last_echo_drop_reported(self) -> int:
-        return int(self._voice_gate_runtime().last_echo_drop_reported)
-
-    @_last_echo_drop_reported.setter
-    def _last_echo_drop_reported(self, value: int) -> None:
-        self._voice_gate_runtime().last_echo_drop_reported = int(value)
-
-    @property
-    def _last_barge_in_reported(self) -> int:
-        return int(self._voice_gate_runtime().last_barge_in_reported)
-
-    @_last_barge_in_reported.setter
-    def _last_barge_in_reported(self, value: int) -> None:
-        self._voice_gate_runtime().last_barge_in_reported = int(value)
-
-    @property
-    def _last_aec_diag_log_at(self) -> float:
-        return float(self._voice_gate_runtime().last_aec_diag_log_at)
-
-    @_last_aec_diag_log_at.setter
-    def _last_aec_diag_log_at(self, value: float) -> None:
-        self._voice_gate_runtime().last_aec_diag_log_at = float(value)
-
-    @property
-    def _last_aec_success_log_at(self) -> float:
-        return float(self._voice_gate_runtime().last_aec_success_log_at)
-
-    @_last_aec_success_log_at.setter
-    def _last_aec_success_log_at(self, value: float) -> None:
-        self._voice_gate_runtime().last_aec_success_log_at = float(value)
-
-    @property
-    def _playback_reference_armed(self) -> bool:
-        return bool(self._voice_gate_runtime().playback_reference_armed)
-
-    @_playback_reference_armed.setter
-    def _playback_reference_armed(self, value: bool) -> None:
-        self._voice_gate_runtime().playback_reference_armed = bool(value)
-
-    @property
-    def _reference_warmup_until(self) -> float:
-        return float(self._voice_gate_runtime().reference_warmup_until)
-
-    @_reference_warmup_until.setter
-    def _reference_warmup_until(self, value: float) -> None:
-        self._voice_gate_runtime().reference_warmup_until = float(value)
-
-    @property
-    def _cached_echo_reference(self) -> bytes:
-        return bytes(self._voice_gate_runtime().cached_echo_reference)
-
-    @_cached_echo_reference.setter
-    def _cached_echo_reference(self, value: bytes) -> None:
-        self._voice_gate_runtime().cached_echo_reference = bytes(value)
-
-    @property
-    def _cached_reference_at(self) -> float:
-        return float(self._voice_gate_runtime().cached_reference_at)
-
-    @_cached_reference_at.setter
-    def _cached_reference_at(self, value: float) -> None:
-        self._voice_gate_runtime().cached_reference_at = float(value)
 
     @Slot()
     def reload_guard_profile(self) -> None:
@@ -559,6 +278,10 @@ class ConversationWorker(QObject):
 
     def _set_state(self, s: str) -> None:
         self._audio_observer.set_ui_state(s, valid_states=_VALID_STATES, idle_state=_STATE_IDLE)
+
+    @property
+    def ui_state(self) -> str:
+        return self._ui_state
 
     @staticmethod
     def _pcm16_level(pcm: bytes) -> float:
@@ -613,30 +336,6 @@ class ConversationWorker(QObject):
     def _reference_needed_samples(self, chunk_bytes: int) -> int:
         return self._audio_policy.reference_needed_samples(chunk_bytes)
 
-    def _is_reference_ready(
-        self,
-        *,
-        now_monotonic: float,
-        reference_needed: int,
-        available_samples: int,
-        played_samples: int,
-        callback_age_ms: int,
-    ) -> bool:
-        return self._audio_policy.is_reference_ready(
-            now_monotonic=now_monotonic,
-            reference_needed=reference_needed,
-            available_samples=available_samples,
-            played_samples=played_samples,
-            callback_age_ms=callback_age_ms,
-        )
-
-    def _can_use_cached_reference(self, *, now_monotonic: float, reference_needed: int, cached_samples: int) -> bool:
-        return self._audio_policy.can_use_cached_reference(
-            now_monotonic=now_monotonic,
-            reference_needed=reference_needed,
-            cached_samples=cached_samples,
-        )
-
     def _ensure_player(self) -> None:
         self._audio_policy.ensure_player()
 
@@ -676,52 +375,23 @@ class ConversationWorker(QObject):
     def _end_session(self) -> None:
         self._audio_lifecycle.end_session()
 
-    def _ensure_realtime(self, turn_mode: str) -> RealtimeService:
-        return self._audio_callbacks.ensure_realtime(turn_mode)
-
-    def _wire_realtime_callbacks(self, rt: RealtimeService) -> None:
-        self._audio_callbacks.wire_realtime_callbacks(rt)
-
     def _handle_user_transcript(self, text: str) -> None:
-        self._audio_callbacks.handle_user_transcript(text)
+        self._session_manager.handle_user_transcript(text)
 
     def _handle_assistant_done(self, text: str) -> None:
-        self._audio_callbacks.handle_assistant_done(text)
+        self._session_manager.handle_assistant_done(text)
 
     def _handle_assistant_audio(self, pcm: bytes) -> None:
-        self._audio_callbacks.handle_assistant_audio(pcm)
+        self._session_manager.handle_assistant_audio(pcm)
 
     def _handle_speech_started(self) -> None:
-        self._audio_callbacks.handle_speech_started()
+        self._session_manager.handle_speech_started()
 
     def _handle_speech_stopped(self) -> None:
-        self._audio_callbacks.handle_speech_stopped()
+        self._session_manager.handle_speech_stopped()
 
     def _handle_response_done(self) -> None:
-        self._audio_callbacks.handle_response_done()
-
-    def _schedule_reconnect(self, reason: str) -> None:
-        self._audio_callbacks.schedule_reconnect(reason)
-
-    def _attempt_reconnect_if_needed(self) -> None:
-        self._audio_callbacks.attempt_reconnect_if_needed()
-
-    def _check_runtime_health(self) -> None:
-        self._audio_callbacks.check_runtime_health()
-
-    def _start_rt_loop(self) -> None:
-        self._rt_runtime_controller.start()
-
-    def _stop_rt_loop(self, *, timeout_s: float = 1.0) -> None:
-        self._rt_runtime_controller.stop(timeout_s=timeout_s)
-
-    def _stop_realtime_session(self) -> None:
-        self._session_manager.shutdown_runtime_resources()
-        self._mode = "idle"
-        self._awaiting_transcript = False
-        self._transport_runtime.reset()
-        self._session_manager.reset_voice_gate_runtime()
-        self._end_session()
+        self._session_manager.handle_response_done()
 
     @Slot()
     def request_stop(self) -> None:

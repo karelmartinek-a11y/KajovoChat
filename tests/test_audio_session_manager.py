@@ -1,9 +1,10 @@
 from __future__ import annotations
+import time
 
 from kajovochat.audio.contracts import SessionHealth
 from kajovochat.audio.runtime_resources import AudioRuntimeResources
 from kajovochat.audio.session_manager import AudioSessionManager
-from kajovochat.audio.session_state import SessionState, validate_session_transition
+from kajovochat.audio.session_state import SessionPresentationState, SessionState, validate_session_transition
 from kajovochat.audio.aec_engine import AecEngine
 from kajovochat.settings import AppSettings
 
@@ -121,7 +122,6 @@ def _build_manager(monkeypatch, *, aec_mode: str = "windows_system_aec", audio_m
         resolve_devices=lambda: None,
         ensure_player=lambda: None,
         start_session_if_needed=lambda: None,
-        stop_realtime_session=lambda: None,
         start_rt_loop=lambda: None,
         stop_rt_loop=lambda: None,
         preferred_frame_size=lambda: 960,
@@ -184,14 +184,14 @@ def test_session_manager_selects_webrtc_when_windows_backend_is_unavailable(monk
         available = False
         reason = "helper missing"
 
-    monkeypatch.setattr("kajovochat.audio.session_manager.probe_windows_native_aec", lambda: _Probe())
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
     monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
 
     manager.start_handsfree()
 
     assert state["mode"] == "handsfree"
     assert state["aec_mode"] == "webrtc_apm"
-    assert manager.session_state == SessionState.READY
+    assert manager.session_state == SessionState.ACTIVE
     backend_logs = [payload for record_type, payload in state["logs"] if record_type == "audio_backend_selected"]
     assert backend_logs
     assert backend_logs[-1]["selected_backend"] == "webrtc_apm"
@@ -205,13 +205,13 @@ def test_session_manager_uses_headset_clean_for_headset_topology(monkeypatch) ->
         available = True
         reason = "native ready"
 
-    monkeypatch.setattr("kajovochat.audio.session_manager.probe_windows_native_aec", lambda: _Probe())
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
     monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
 
     manager.start_handsfree()
 
     assert state["aec_mode"] == "headset_clean"
-    assert manager.session_state == SessionState.READY
+    assert manager.session_state == SessionState.ACTIVE
     backend_logs = [payload for record_type, payload in state["logs"] if record_type == "audio_backend_selected"]
     assert backend_logs
     assert backend_logs[-1]["selected_backend"] == "headset_clean"
@@ -232,7 +232,7 @@ def test_session_manager_reference_health_triggers_controlled_fallback(monkeypat
         available = False
         reason = "helper missing"
 
-    monkeypatch.setattr("kajovochat.audio.session_manager.probe_windows_native_aec", lambda: _Probe())
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
     monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
 
     manager.start_handsfree()
@@ -247,6 +247,8 @@ def test_session_manager_reference_health_triggers_controlled_fallback(monkeypat
     assert fallback_logs
     assert fallback_logs[-1]["from_backend"] == "webrtc_apm"
     assert fallback_logs[-1]["to_backend"] == "degraded_no_aec"
+    session_states = [payload["session_state"] for record_type, payload in state["logs"] if record_type == "audio_session_state"]
+    assert "recovering" in session_states
 
 
 def test_session_manager_windows_backend_falls_back_when_quality_stays_poor(monkeypatch) -> None:
@@ -256,7 +258,7 @@ def test_session_manager_windows_backend_falls_back_when_quality_stays_poor(monk
         available = True
         reason = "native ready"
 
-    monkeypatch.setattr("kajovochat.audio.session_manager.probe_windows_native_aec", lambda: _Probe())
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
     monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
 
     manager.start_handsfree()
@@ -264,7 +266,7 @@ def test_session_manager_windows_backend_falls_back_when_quality_stays_poor(monk
 
     for _ in range(6):
         manager.note_aec_observation(
-            backend="windows_native",
+            backend="windows_system_aec",
             reference_miss=False,
             aec_quality=0.01,
             improvement_ratio=0.05,
@@ -282,14 +284,14 @@ def test_session_manager_windows_backend_falls_back_when_quality_stays_poor(monk
     assert fallback_logs[-1]["reason"] == "windows_system_aec_unhealthy"
 
 
-def test_session_manager_treats_windows_system_capture_as_healthy(monkeypatch) -> None:
+def test_session_manager_treats_windows_system_aec_capture_contract_as_healthy(monkeypatch) -> None:
     manager, state, _realtime = _build_manager(monkeypatch, aec_mode="windows_system_aec")
 
     class _Probe:
         available = True
         reason = "native ready"
 
-    monkeypatch.setattr("kajovochat.audio.session_manager.probe_windows_native_aec", lambda: _Probe())
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
     monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
 
     manager.start_handsfree()
@@ -297,7 +299,7 @@ def test_session_manager_treats_windows_system_capture_as_healthy(monkeypatch) -
 
     for _ in range(8):
         manager.note_aec_observation(
-            backend="windows_system_capture",
+            backend="windows_system_aec",
             reference_miss=False,
             aec_quality=0.0,
             improvement_ratio=0.0,
@@ -334,27 +336,29 @@ def test_session_manager_logs_internal_state_transitions(monkeypatch) -> None:
     manager.request_stop()
 
     states = [payload["session_state"] for record_type, payload in state["logs"] if record_type == "audio_session_state"]
-    assert "initializing" in states
-    assert "calibrating" in states
-    assert "ready" in states or "degraded" in states
+    assert "starting" in states
+    assert "probing" in states
+    assert "active" in states or "degraded" in states
     assert "stopping" in states
     assert states[-1] == "idle"
 
 
-def test_session_manager_tracks_runtime_render_and_barge_in_states(monkeypatch) -> None:
+def test_session_manager_keeps_runtime_render_and_barge_in_as_ui_only(monkeypatch) -> None:
     manager, state, _realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     manager.start_handsfree()
-    manager.note_assistant_rendering()
-    manager.note_speech_started(assistant_rendering=True)
-    manager.note_barge_in_transition()
+    manager.note_assistant_output_started()
+    manager.note_speech_started(during_assistant_output=True)
+    manager.note_user_turn_committed()
     manager.note_response_done()
 
-    states = [payload["session_state"] for record_type, payload in state["logs"] if record_type == "audio_session_state"]
-    assert "assistant_rendering" in states
-    assert "double_talk" in states
-    assert "barge_in_transition" in states
-    assert states[-1] == "degraded"
+    session_states = [payload["session_state"] for record_type, payload in state["logs"] if record_type == "audio_session_state"]
+    ui_states = list(state["states"])
+
+    assert "speaking" in ui_states
+    assert "transcribing" in ui_states
+    assert session_states[-1] == "degraded"
+    assert all(value not in session_states for value in {"during_assistant_output", "double_talk", "barge_in_transition"})
 
 
 def test_audio_session_manager_survives_ten_consecutive_handsfree_sessions(monkeypatch) -> None:
@@ -366,7 +370,7 @@ def test_audio_session_manager_survives_ten_consecutive_handsfree_sessions(monke
         manager.transport = transport  # type: ignore[assignment]
         manager.recovery.transport = transport  # type: ignore[assignment]
         manager.start_handsfree()
-        assert manager.session_state in {SessionState.READY, SessionState.DEGRADED}
+        assert manager.session_state in {SessionState.ACTIVE, SessionState.DEGRADED}
         manager.request_stop()
         assert manager.session_state == SessionState.IDLE
 
@@ -381,7 +385,7 @@ def test_audio_session_manager_recovers_to_fallback_without_failing_session(monk
         available = True
         reason = "native ready"
 
-    monkeypatch.setattr("kajovochat.audio.session_manager.probe_windows_native_aec", lambda: _Probe())
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
     monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
 
     manager.start_handsfree()
@@ -389,7 +393,7 @@ def test_audio_session_manager_recovers_to_fallback_without_failing_session(monk
 
     for _ in range(6):
         manager.note_aec_observation(
-            backend="windows_native",
+            backend="windows_system_aec",
             reference_miss=False,
             aec_quality=0.01,
             improvement_ratio=0.04,
@@ -400,9 +404,9 @@ def test_audio_session_manager_recovers_to_fallback_without_failing_session(monk
         )
 
     assert state["aec_mode"] == "webrtc_apm"
-    assert manager.session_state in {SessionState.RECOVERING, SessionState.READY}
+    assert manager.session_state in {SessionState.RECOVERING, SessionState.ACTIVE}
     manager.note_response_done()
-    assert manager.session_state == SessionState.READY
+    assert manager.session_state == SessionState.ACTIVE
 
 
 def test_audio_telemetry_snapshot_returns_session_health_contract(monkeypatch) -> None:
@@ -427,7 +431,7 @@ def test_audio_telemetry_counts_backend_switches_and_degraded_transition(monkeyp
         available = False
         reason = "helper missing"
 
-    monkeypatch.setattr("kajovochat.audio.session_manager.probe_windows_native_aec", lambda: _Probe())
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
     monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
 
     manager.start_handsfree()
@@ -446,15 +450,16 @@ def test_audio_session_manager_acceptance_like_barge_in_flow(monkeypatch) -> Non
     manager, state, _realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     manager.start_handsfree()
-    manager.note_assistant_rendering()
-    manager.note_speech_started(assistant_rendering=True)
-    manager.note_barge_in_transition()
+    manager.note_assistant_output_started()
+    manager.note_speech_started(during_assistant_output=True)
+    manager.note_user_turn_committed()
     manager.note_response_done()
 
     transitions = [payload["session_state"] for record_type, payload in state["logs"] if record_type == "audio_session_state"]
-    assert transitions.count("assistant_rendering") >= 1
-    assert transitions.count("double_talk") >= 1
-    assert transitions.count("barge_in_transition") >= 1
+    ui_states = list(state["states"])
+    assert all(value not in transitions for value in {"during_assistant_output", "double_talk", "barge_in_transition"})
+    assert "speaking" in ui_states
+    assert "transcribing" in ui_states
     assert transitions[-1] == "degraded"
 
 
@@ -494,7 +499,7 @@ def test_audio_session_manager_device_instability_triggers_fallback(monkeypatch)
         available = False
         reason = "helper missing"
 
-    monkeypatch.setattr("kajovochat.audio.session_manager.probe_windows_native_aec", lambda: _Probe())
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
     monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
 
     manager.start_handsfree()
@@ -508,19 +513,21 @@ def test_audio_session_manager_device_instability_triggers_fallback(monkeypatch)
     fallback_logs = [payload for record_type, payload in state["logs"] if record_type == "audio_backend_fallback"]
     assert fallback_logs
     assert fallback_logs[-1]["reason"] == "device_unavailable"
+    session_states = [payload["session_state"] for record_type, payload in state["logs"] if record_type == "audio_session_state"]
+    assert "recovering" in session_states
 
 
 def test_session_state_transition_validator_rejects_skipped_path() -> None:
-    validate_session_transition(SessionState.IDLE, SessionState.INITIALIZING)
-    validate_session_transition(SessionState.INITIALIZING, SessionState.CALIBRATING)
-    validate_session_transition(SessionState.CALIBRATING, SessionState.READY)
+    validate_session_transition(SessionState.IDLE, SessionState.STARTING)
+    validate_session_transition(SessionState.STARTING, SessionState.PROBING)
+    validate_session_transition(SessionState.PROBING, SessionState.ACTIVE)
 
     try:
-        validate_session_transition(SessionState.IDLE, SessionState.READY)
+        validate_session_transition(SessionState.IDLE, SessionState.ACTIVE)
     except Exception:
         pass
     else:
-        raise AssertionError("Přechod idle -> ready má být neplatný bez inicializace a kalibrace.")
+        raise AssertionError("Přechod idle -> active má být neplatný bez startingu a probingu.")
 
 
 def test_aec_engine_select_backend_degrades_when_all_production_backends_are_unavailable() -> None:
@@ -584,3 +591,106 @@ def test_recovery_exhaustion_is_logged(monkeypatch) -> None:
     assert exhausted_logs
     assert exhausted_logs[-1]["failure_reason"] == "recovery_exhausted"
     assert state["errors"]
+
+
+def test_audio_telemetry_serializable_snapshot_exposes_recovery_story(monkeypatch) -> None:
+    manager, _state, _realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
+
+    manager.start_handsfree()
+    manager.note_reference_health(ready=False, available_samples=0, callback_age_ms=180)
+    manager.note_barge_in_result(success=True, reason="user_took_turn")
+
+    snapshot = manager.telemetry.serializable_snapshot(session_state=manager.session_state.value).to_log_payload()
+
+    assert snapshot["selected_backend"] == "degraded_no_aec"
+    assert snapshot["fallback_chain_step"] == 0
+    assert snapshot["reference_health_timeline"]
+    assert snapshot["recovery_story"]
+    assert "timings" in snapshot
+    assert "turn_latency" in snapshot
+
+
+
+def test_runtime_watchdog_reconnect_is_centralized_in_recovery_supervisor(monkeypatch) -> None:
+    manager, state, _realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
+
+    manager.start_handsfree()
+    manager.set_presentation_state(SessionPresentationState.TRANSCRIBING, reason="test_watchdog")
+    manager.telemetry.last_server_activity_at = time.monotonic() - 30.0
+    manager._runtime_resources.duplex = None
+    manager._runtime_resources.player = None
+    manager.runtime_pending_snapshot = lambda: {"pending_events": 0, "pending_mic": 0, "pending_player_bytes": 0}  # type: ignore[method-assign]
+
+    manager.check_runtime_health()
+
+    error_logs = [payload for record_type, payload in state["logs"] if record_type == "audio_session_error"]
+    reconnect_logs = [payload for record_type, payload in state["logs"] if record_type == "reconnect_scheduled"]
+    assert error_logs
+    assert error_logs[-1]["failure_reason"] == "transport_timeout"
+    assert error_logs[-1]["recovery_action"] == "transport_reconnect"
+    assert reconnect_logs
+
+
+def test_aec_engine_product_mode_contracts_make_product_modes_explicit() -> None:
+    engine = AecEngine("windows_system_aec")
+
+    degraded = engine.product_mode_contract_for(
+        selected_backend="degraded_no_aec",
+        requested_backend="windows_system_aec",
+        audio_mode="notebook_builtin",
+        degradation_cause="windows_system_aec_unavailable",
+    )
+    headset = engine.product_mode_contract_for(
+        selected_backend="headset_clean",
+        requested_backend="headset_clean",
+        audio_mode="wired_headset",
+    )
+
+    assert degraded.key == "notebook_builtin_degraded_no_aec"
+    assert degraded.capture_gate_policy == "degraded_no_aec"
+    assert degraded.recovery_policy == "probe_richer_backend_again"
+    assert degraded.recovery_retry_budget == 2
+    assert headset.key == "headset_clean"
+    assert headset.requires_reference is False
+    assert headset.recovery_retry_budget == 0
+
+
+def test_session_manager_telemetry_exposes_product_mode_for_headset(monkeypatch) -> None:
+    manager, _state, _realtime = _build_manager(monkeypatch, aec_mode="windows_system_aec", audio_mode="wired_headset")
+
+    class _Probe:
+        available = True
+        reason = "native ready"
+
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
+    monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
+
+    manager.start_handsfree()
+    snapshot = manager.telemetry.serializable_snapshot(session_state=manager.session_state.value).to_log_payload()
+
+    assert snapshot["product_mode_key"] == "headset_clean"
+    assert snapshot["capture_gate_policy"] == "headset_clean"
+    assert snapshot["recovery_policy"] == "topology_locked"
+
+
+def test_session_manager_logs_degraded_reason_and_product_mode(monkeypatch) -> None:
+    manager, state, _realtime = _build_manager(monkeypatch)
+
+    class _Probe:
+        available = False
+        reason = "helper missing"
+
+    monkeypatch.setattr("kajovochat.audio.session_manager.windows_system_aec_healthcheck", lambda: _Probe().as_tuple() if hasattr(_Probe(), "as_tuple") else (bool(_Probe().available), _Probe().reason))
+    monkeypatch.setattr("kajovochat.audio.session_manager._WebRTCAudioProcessor", object())
+
+    manager.start_handsfree()
+    for _ in range(12):
+        manager.note_reference_health(ready=False, available_samples=0, callback_age_ms=180)
+
+    snapshot = manager.telemetry.serializable_snapshot(session_state=manager.session_state.value).to_log_payload()
+    captions = "\n".join(state["captions"])
+
+    assert snapshot["product_mode_key"] == "notebook_builtin_degraded_no_aec"
+    assert snapshot["fallback_reason"] == "reference_pipeline_unhealthy"
+    assert snapshot["degradation_cause"] == "reference_pipeline_unhealthy"
+    assert "Důvod: reference_pipeline_unhealthy" in captions

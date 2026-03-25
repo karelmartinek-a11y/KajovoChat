@@ -1,0 +1,14 @@
+{
+  "scenario": "soak_device_reset_xrun_fault_injection",
+  "kind": "soak",
+  "backend_chain": [
+    "windows_system_aec",
+    "webrtc_apm"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "Hands-free: Realtime aktivní (server VAD).",
+    "Audio: fallback windows_system_aec -> webrtc_apm (device_unavailable)."
+  ]
+}

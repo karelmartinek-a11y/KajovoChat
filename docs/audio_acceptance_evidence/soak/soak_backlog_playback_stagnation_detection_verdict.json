@@ -1,0 +1,13 @@
+{
+  "scenario": "soak_backlog_playback_stagnation_detection",
+  "kind": "soak",
+  "backend_chain": [
+    "windows_system_aec"
+  ],
+  "final_state": "recovering",
+  "verdict": "PASS",
+  "captions": [
+    "Hands-free: Realtime aktivní (server VAD).",
+    "Realtime: plánuji reconnect za 1.5 s"
+  ]
+}

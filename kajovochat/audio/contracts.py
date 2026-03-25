@@ -64,6 +64,10 @@ class BackendHealthSnapshot:
     health_score: float = 0.0
     requested_backend: str = ""
     audio_mode: str = ""
+    product_mode_key: str = ""
+    product_status: str = ""
+    capture_gate_policy: str = ""
+    recovery_policy: str = ""
     reference_ready: bool = False
     reference_available_samples: int = 0
     reference_callback_age_ms: int = -1
@@ -87,6 +91,10 @@ class BackendHealthSnapshot:
             "health_score": float(self.health_score),
             "requested_backend": self.requested_backend,
             "audio_mode": self.audio_mode,
+            "product_mode_key": self.product_mode_key,
+            "product_status": self.product_status,
+            "capture_gate_policy": self.capture_gate_policy,
+            "recovery_policy": self.recovery_policy,
             "reference_ready": bool(self.reference_ready),
             "reference_available_samples": int(self.reference_available_samples),
             "reference_callback_age_ms": int(self.reference_callback_age_ms),
@@ -111,31 +119,35 @@ class BackendHealthSnapshot:
 
 @dataclass(frozen=True)
 class SessionHealth:
-    requested_backend: str
-    selected_backend: str
-    fallback_reason: str
-    degradation_cause: str
-    device_fingerprint: str
-    audio_mode: str
-    session_state: str
-    session_started_at_mono: float
-    session_activated_at_mono: float
-    uptime_s: float
-    active_for_s: float
-    last_server_activity_age_s: float
-    reference_ready: bool
-    reference_health: str
-    reference_available_samples: int
-    reference_callback_age_ms: int
-    reference_ready_events: int
-    reference_miss_events: int
-    reference_consecutive_misses: int
-    poor_aec_events: int
-    poor_aec_consecutive: int
-    recovery_attempts_scheduled: int
-    recovery_attempts_total: int
-    next_reconnect_at_mono: float
-    last_failure_reason: str
+    requested_backend: str = ""
+    selected_backend: str = ""
+    fallback_reason: str = ""
+    degradation_cause: str = ""
+    device_fingerprint: str = ""
+    audio_mode: str = ""
+    product_mode_key: str = ""
+    product_status: str = ""
+    capture_gate_policy: str = ""
+    recovery_policy: str = ""
+    session_state: str = ""
+    session_started_at_mono: float = 0.0
+    session_activated_at_mono: float = 0.0
+    uptime_s: float = 0.0
+    active_for_s: float = 0.0
+    last_server_activity_age_s: float = 0.0
+    reference_ready: bool = False
+    reference_health: str = "unknown"
+    reference_available_samples: int = 0
+    reference_callback_age_ms: int = -1
+    reference_ready_events: int = 0
+    reference_miss_events: int = 0
+    reference_consecutive_misses: int = 0
+    poor_aec_events: int = 0
+    poor_aec_consecutive: int = 0
+    recovery_attempts_scheduled: int = 0
+    recovery_attempts_total: int = 0
+    next_reconnect_at_mono: float = 0.0
+    last_failure_reason: str = ""
     recovery_successes_total: int = 0
     degraded_transitions_total: int = 0
     backend_switches_total: int = 0
@@ -154,6 +166,10 @@ class SessionHealth:
             "degradation_cause": self.degradation_cause,
             "device_fingerprint": self.device_fingerprint,
             "audio_mode": self.audio_mode,
+            "product_mode_key": self.product_mode_key,
+            "product_status": self.product_status,
+            "capture_gate_policy": self.capture_gate_policy,
+            "recovery_policy": self.recovery_policy,
             "session_state": self.session_state,
             "session_timing": {
                 "started_at_mono": round(self.started_at_mono, 6),

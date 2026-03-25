@@ -1,0 +1,18 @@
+{
+  "scenario": "soak_repeated_tts_and_barge_in",
+  "kind": "soak",
+  "backend_chain": [
+    "windows_system_aec"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "Hands-free: Realtime aktivní (server VAD).",
+    "Ty: barge-0",
+    "Ty: barge-1",
+    "Ty: barge-2",
+    "Ty: barge-3",
+    "Ty: barge-4",
+    "Ty: barge-5"
+  ]
+}

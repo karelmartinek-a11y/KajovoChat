@@ -183,7 +183,7 @@ def probe_windows_native_aec() -> WindowsNativeAECProbe:
 
 
 class WindowsNativeAECBackend:
-    """Tenká adapter vrstva pro nativni Windows AEC helper DLL."""
+    """Nízkourovňová implementace finálního backendu windows_system_aec."""
 
     def __init__(self, *, input_samplerate: int, filter_length: int, max_shift_samples: int) -> None:
         probe = probe_windows_native_aec()
@@ -474,7 +474,7 @@ class WindowsNativeAECSession:
                 render_ref_pcm16=render_ref,
                 sample_rate=int(self.config.samplerate),
                 channels=int(self.config.channels),
-                aec_backend="windows_system_capture" if self.using_system_capture_contract else "windows_native",
+                aec_backend="windows_system_aec",
                 aec_quality=float(getattr(self._backend, "last_quality", 0.0)),
                 residual_level=float(getattr(self._backend, "last_residual", 0.0)),
                 vad_probability=float(getattr(self._backend, "last_voice_probability", 0.0)),
@@ -500,7 +500,7 @@ class WindowsNativeAECSession:
             return None
 
     def get_health_snapshot(self) -> WindowsNativeAECSessionHealth:
-        backend_name = "windows_system_capture" if self.using_system_capture_contract else "windows_native"
+        backend_name = "windows_system_aec"
         return WindowsNativeAECSessionHealth(
             frame_index=int(self._frame_index),
             processed_frames=int(self._processed_frames),
@@ -515,6 +515,10 @@ class WindowsNativeAECSession:
                 reference_ready=bool(self.using_system_capture_contract or self._last_render_frame is not None),
                 reference_available_samples=0 if self.using_system_capture_contract else len((self._last_render_frame.pcm16 if self._last_render_frame else b"")) // 2,
                 reference_callback_age_ms=0,
+                product_mode_key="notebook_builtin_windows_system_aec",
+                product_status="Notebook builtin + Windows System AEC",
+                capture_gate_policy="windows_system_aec",
+                recovery_policy="prefer_current_until_failure",
                 reference_health_state="system_capture" if self.using_system_capture_contract else "render_feed",
                 poor_aec_events=0,
                 poor_aec_consecutive=0,

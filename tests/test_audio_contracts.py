@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from kajovochat.audio.contracts import BackendHealthSnapshot, CaptureFrame, RenderFrame, SessionHealth
-from kajovochat.services.audio_service import CapturedAudioChunk, DuplexAudioSession
+from kajovochat.audio.io import CapturedAudioChunk, DuplexAudioSession
 
 
 def test_captured_audio_chunk_converts_to_capture_frame() -> None:
@@ -54,7 +54,7 @@ def test_session_health_contract_exposes_log_payload() -> None:
         degradation_cause="",
         device_fingerprint="fp-1",
         audio_mode="notebook_builtin",
-        session_state="ready",
+        session_state="active",
         session_started_at_mono=1.0,
         session_activated_at_mono=2.0,
         uptime_s=3.5,

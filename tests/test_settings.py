@@ -120,7 +120,7 @@ def test_audio_aec_mode_promotes_webrtc_when_native_driver_is_installed(monkeypa
         installed_driver = True
 
     monkeypatch.setattr(
-        "kajovochat.services.windows_native_aec.probe_windows_native_aec",
+        "kajovochat.audio.windows_system_aec.probe_windows_system_aec",
         lambda: DummyProbe(),
     )
 
@@ -133,7 +133,7 @@ def test_audio_aec_mode_keeps_custom_lab_even_when_native_driver_is_installed(mo
         installed_driver = True
 
     monkeypatch.setattr(
-        "kajovochat.services.windows_native_aec.probe_windows_native_aec",
+        "kajovochat.audio.windows_system_aec.probe_windows_system_aec",
         lambda: DummyProbe(),
     )
 
@@ -146,7 +146,7 @@ def test_audio_aec_mode_keeps_explicit_webrtc_apm_even_when_native_driver_is_ins
         installed_driver = True
 
     monkeypatch.setattr(
-        "kajovochat.services.windows_native_aec.probe_windows_native_aec",
+        "kajovochat.audio.windows_system_aec.probe_windows_system_aec",
         lambda: DummyProbe(),
     )
 
@@ -159,7 +159,7 @@ def test_audio_aec_mode_keeps_headset_clean_even_when_native_driver_is_installed
         installed_driver = True
 
     monkeypatch.setattr(
-        "kajovochat.services.windows_native_aec.probe_windows_native_aec",
+        "kajovochat.audio.windows_system_aec.probe_windows_system_aec",
         lambda: DummyProbe(),
     )
 

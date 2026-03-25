@@ -1,0 +1,14 @@
+{
+  "scenario": "acceptance_builtin_windows_fallback_webrtc",
+  "kind": "acceptance",
+  "backend_chain": [
+    "windows_system_aec",
+    "webrtc_apm"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "Audio: notebook builtin režim přes webrtc_apm.",
+    "Hands-free: Realtime aktivní (server VAD)."
+  ]
+}

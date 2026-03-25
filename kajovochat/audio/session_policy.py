@@ -6,9 +6,8 @@ from typing import Any, Optional
 import sounddevice as sd
 
 from ..settings import DEFAULT_AUDIO_GUARD_PROFILE, normalize_audio_device_mode
-from ..services.audio_service import AudioPlayer, DuplexAudioSession, build_device_fingerprint, pick_audio_device
-from .voice_gate import can_use_cached_reference as voice_gate_can_use_cached_reference
-from .voice_gate import resolve_reference_gate
+from .devices import build_device_fingerprint, pick_audio_device
+from .io import AudioPlayer, DuplexAudioSession
 
 
 @dataclass
@@ -106,55 +105,23 @@ class ConversationAudioPolicy:
         owner = self._owner
         return max(int(chunk_bytes) // 2 + max(96, owner._aec.filter_length // 6), 640)
 
-    def is_reference_ready(
-        self,
-        *,
-        now_monotonic: float,
-        reference_needed: int,
-        available_samples: int,
-        played_samples: int,
-        callback_age_ms: int,
-    ) -> bool:
-        owner = self._owner
-        decision = resolve_reference_gate(
-            owner._session_manager.voice_gate_runtime,
-            aec_requires_reference=True,
-            now_monotonic=now_monotonic,
-            reference_needed=reference_needed,
-            available_samples=available_samples,
-            played_samples=played_samples,
-            callback_age_ms=callback_age_ms,
-        )
-        return bool(decision.ready)
-
-    def can_use_cached_reference(self, *, now_monotonic: float, reference_needed: int, cached_samples: int) -> bool:
-        owner = self._owner
-        runtime = owner._session_manager.voice_gate_runtime
-        if cached_samples < max(448, reference_needed - 448):
-            return False
-        return voice_gate_can_use_cached_reference(
-            runtime,
-            now_monotonic=now_monotonic,
-            reference_needed=reference_needed,
-            cached_samples=cached_samples,
-        )
-
     def ensure_player(self) -> None:
         owner = self._owner
-        if owner._duplex is not None:
-            owner._player = owner._duplex.player
-            owner._mic = owner._duplex.mic
+        runtime = owner._runtime_resources
+        if runtime.duplex is not None:
+            runtime.player = runtime.duplex.player
+            runtime.mic = runtime.duplex.mic
             return
-        if owner._player is not None:
+        if runtime.player is not None:
             return
-        owner._player = AudioPlayer(
+        runtime.player = AudioPlayer(
             samplerate=24000,
             device=owner._resolved_output_device,
             blocksize=owner._preferred_frame_size(),
         )
 
     def active_duplex(self) -> Optional[DuplexAudioSession]:
-        return self._owner._duplex
+        return self._owner._runtime_resources.duplex
 
     def device_calibration_matches(self) -> bool:
         owner = self._owner

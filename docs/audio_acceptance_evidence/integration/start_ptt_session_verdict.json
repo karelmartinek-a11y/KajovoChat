@@ -1,0 +1,13 @@
+{
+  "scenario": "start_ptt_session",
+  "kind": "integration",
+  "backend_chain": [
+    "windows_system_aec"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "PTT: poslouchám…",
+    "PTT: čekám na odpověď…"
+  ]
+}

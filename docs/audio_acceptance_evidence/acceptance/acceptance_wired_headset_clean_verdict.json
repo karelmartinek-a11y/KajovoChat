@@ -1,0 +1,13 @@
+{
+  "scenario": "acceptance_wired_headset_clean",
+  "kind": "acceptance",
+  "backend_chain": [
+    "headset_clean"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "Audio: headset clean režim bez AEC a bez očekávání playback reference.",
+    "Hands-free: Realtime aktivní (server VAD)."
+  ]
+}

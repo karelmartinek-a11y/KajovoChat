@@ -55,9 +55,10 @@ Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. So
 ## Struktura projektu
 
 - `kajovochat/` hlavní aplikační balíček
-- `kajovochat/main.py` GUI a orchestrace hlasové relace
+- `kajovochat/main.py` GUI vrstva a delegace na session entry pointy
+- `kajovochat/audio/` finální session-oriented audio architektura
 - `kajovochat/settings.py` minimální produktové nastavení a systémový prompt
-- `kajovochat/services/` audio, realtime websocket, OpenAI služby a logování
+- `kajovochat/services/` podpůrné služby bez audio runtime ownershipu
 - `kajovochat/widgets/` vlastní UI widgety
 - `kajovochat/orb/` původní orb engine ponechaný kvůli kompatibilitě a testům starších částí
 - `kajovochat/resources/assets/` obrázkové assety
@@ -70,47 +71,48 @@ python -m compileall -q kajovochat app_gui.py
 pytest -q
 ```
 
-## Audio AEC diagnostika
+## Finální audio architektura
 
-Aktualni audio stack pouziva kombinaci:
+Audio stack je po etapě 8 uzavřený jako session-oriented architektura v `kajovochat/audio/`.
 
-- vlastniho guardu a telemetrie v `kajovochat/main.py`
-- nativni windows helper cesty `windows_system_aec`, pokud je dostupna DLL
-- pripravene APO helper cesty `windows_system_aec`, pokud je dostupna DLL
-- vlastniho adaptivniho AEC v `kajovochat/services/audio_service.py`
-- volitelneho backendu `aec-audio-processing` pro WebRTC AEC cisteni vhodnych echo-only bloku
+Hlavní autority jsou:
 
-Pri realnem ladeni na HW je dulezite sledovat session `jsonl` log v adresari logu aplikace a hlavne zaznamy `aec_diag` a `aec_summary`.
+- `AudioSessionManager` pro session entry pointy a aplikaci rozhodnutí
+- `VoiceGate` pro hlasovou UX politiku
+- `RecoverySupervisor` pro recovery policy
+- `AudioTelemetry` pro session health, fallback story a serializovatelný snapshot
+- `windows_system_aec` jako finálně uzavřený produkční backend detail
 
-Nejdolezitejsi pole:
+Produktové režimy jsou explicitní a auditovatelné:
 
-- `reference_miss_ratio`: jak casto AEC vubec nemel pouzitelnou playback reference
-- `reference_ready_ratio`: jak casto byla reference pripravena
-- `aligned_ratio`: jak casto se reference a mic chunk rozumne zarovnaly
-- `avg_quality_when_aligned`: kvalita odeectu jen v zarovnanych blocich
-- `avg_delay_error`: prumerna chyba mezi runtime delay a aktualni kalibraci
-- `backend`: jestli blok cistil `custom` nebo `webrtc`
-- `ws=on`: `webrtc_success`, tedy blok, kde WebRTC backend realne zafungoval i kdyz vlastni `similarity` nemusela byt vysoka
+- `notebook_builtin + windows_system_aec`
+- `notebook_builtin + webrtc_apm`
+- `notebook_builtin + degraded_no_aec`
+- `headset_clean`
 
-Prakticka interpretace:
+Deterministický fallback chain je:
 
-- vysoke `reference_miss_ratio` znamena problem v playback reference pipeline
-- nizke `aligned_ratio` znamena problem v coarse delay/alignment vrstve
-- `backend=webrtc` + `ws=on` + nizky `residual` znamena realne funkcni echo odeect
-- vysoke `avg_delay_error` znamena nestabilni runtime latenci
+- `windows_system_aec -> webrtc_apm -> degraded_no_aec`
+- `headset_clean` je samostatná topology-locked cesta
 
-Aktualni stav projektu je prakticky pouzitelny, ale stale nejde o plne stabilni OS-level AEC. Dalsi ladeni ma smysl delat podle realnych session logu, ne naslepo.
+Pro důkazy a reprodukovatelné běhy viz:
+
+- `docs/final_audio_architecture.md`
+- `FINAL_ACCEPTANCE_MATRIX.md`
+- `docs/audio_acceptance_evidence/`
+- `tools/audio_architecture_harness.py`
+- `tools/generate_audio_acceptance_evidence.py`
 
 ## Session log troubleshooting
 
-Session `.jsonl` log je teď primární zdroj pravdy pro notebookovou hlasovou relaci. Při ladění jedné relace sledujte minimálně:
+Session `.jsonl` log je primární zdroj pravdy pro notebookovou hlasovou relaci. Sledujte minimálně:
 
-- `audio_session_state` – lifecycle relace (`starting` → `probing` → `active` / `degraded` / `recovering`)
+- `audio_session_state` – lifecycle relace (`idle` → `starting` → `probing` → `active` / `degraded` / `recovering` → `stopping` / `failed`)
 - `audio_backend_selected` – požadovaný a skutečně aktivní backend
 - `audio_backend_fallback` – řízený přechod na další backend v chainu
 - `audio_reference_health` – stav playback reference pipeline
 - `reconnect_*` – transport recovery
-- `aec_diag` a `aec_summary` – block-level DSP diagnostika
+- `session_telemetry_snapshot` – serializovatelný session snapshot pro acceptance a soak ověření
 
 Bezpečný default konfigurace je:
 
@@ -119,7 +121,7 @@ Bezpečný default konfigurace je:
 - `audio_session_profile=production`
 - `audio_diagnostics_enabled=false`
 
-Diagnostické přepínače jsou oddělené od produkčních režimů. `custom_lab` je explicitní laboratorní mód, ne běžná produkční cesta.
+Diagnostické přepínače jsou oddělené od produkčních rozhodovacích cest. `custom_lab` je explicitní laboratorní mód, ne běžná produkční cesta.
 
 ## Build pro macOS
 

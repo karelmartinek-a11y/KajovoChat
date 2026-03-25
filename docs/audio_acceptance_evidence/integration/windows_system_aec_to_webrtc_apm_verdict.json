@@ -1,0 +1,14 @@
+{
+  "scenario": "windows_system_aec_to_webrtc_apm",
+  "kind": "integration",
+  "backend_chain": [
+    "windows_system_aec",
+    "webrtc_apm"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "Audio: notebook builtin režim přes webrtc_apm.",
+    "Hands-free: Realtime aktivní (server VAD)."
+  ]
+}

@@ -314,9 +314,9 @@ def _promote_audio_aec_mode_for_installed_native_backend(current_mode: str) -> s
     if normalized != "webrtc_apm" or raw_value not in legacy_promotable_values:
         return normalized
     try:
-        from .services.windows_native_aec import probe_windows_native_aec
+        from .audio.windows_system_aec import probe_windows_system_aec
 
-        probe = probe_windows_native_aec()
+        probe = probe_windows_system_aec()
         if probe.available and probe.installed_driver:
             return "windows_system_aec"
     except Exception:

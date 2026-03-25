@@ -69,7 +69,7 @@ def test_windows_native_aec_session_processes_frame_with_render_reference() -> N
     assert frame.mono_ns == 654321
     assert frame.sample_rate == 24000
     assert frame.channels == 1
-    assert frame.aec_backend == "windows_native"
+    assert frame.aec_backend == "windows_system_aec"
     assert frame.aec_quality == 0.82
     assert frame.vad_probability == 0.37
     assert frame.stream_delay_ms == 12
@@ -79,7 +79,7 @@ def test_windows_native_aec_session_processes_frame_with_render_reference() -> N
 
     health = session.get_health_snapshot()
     assert health.processed_frames == 1
-    assert health.backend_snapshot.backend == "windows_native"
+    assert health.backend_snapshot.backend == "windows_system_aec"
     assert health.backend_snapshot.reference_health_state == "render_feed"
 
     session.close()
@@ -102,11 +102,11 @@ def test_windows_native_aec_session_uses_system_capture_contract_without_referen
 
     frame = session.read_capture_frame(timeout_ms=0)
     assert frame is not None
-    assert frame.aec_backend == "windows_system_capture"
+    assert frame.aec_backend == "windows_system_aec"
     assert frame.double_talk is True
     assert backend.calls[0]["reference_samples"] == 0
 
     health = session.get_health_snapshot()
-    assert health.backend_snapshot.backend == "windows_system_capture"
+    assert health.backend_snapshot.backend == "windows_system_aec"
     assert health.backend_snapshot.reference_ready is True
     assert health.backend_snapshot.reference_health_state == "system_capture"

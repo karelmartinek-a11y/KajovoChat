@@ -1,0 +1,12 @@
+{
+  "scenario": "acceptance_builtin_windows_available",
+  "kind": "acceptance",
+  "backend_chain": [
+    "windows_system_aec"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "Hands-free: Realtime aktivní (server VAD)."
+  ]
+}

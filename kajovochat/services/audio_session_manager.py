@@ -3,7 +3,7 @@ from __future__ import annotations
 from ..audio.session_manager import AudioSessionManager
 from ..audio.aec_engine import AecEngine, BackendSelectionDecision
 from ..audio.session_state import SessionState
-from .audio_service import DuplexAudioSession
+from ..audio.io import DuplexAudioSession
 from .windows_native_aec import probe_windows_native_aec
 
 try:

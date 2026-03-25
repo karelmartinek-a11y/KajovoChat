@@ -1,0 +1,14 @@
+{
+  "scenario": "acceptance_reconnect_during_active_handsfree",
+  "kind": "acceptance",
+  "backend_chain": [
+    "windows_system_aec"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "Hands-free: Realtime aktivní (server VAD).",
+    "Realtime: plánuji reconnect za 0.8 s",
+    "Realtime: obnovuji spojení…"
+  ]
+}

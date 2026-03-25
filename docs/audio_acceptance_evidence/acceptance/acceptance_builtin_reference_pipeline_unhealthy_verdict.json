@@ -1,0 +1,16 @@
+{
+  "scenario": "acceptance_builtin_reference_pipeline_unhealthy",
+  "kind": "acceptance",
+  "backend_chain": [
+    "windows_system_aec",
+    "webrtc_apm",
+    "degraded_no_aec"
+  ],
+  "final_state": "degraded",
+  "verdict": "PASS",
+  "captions": [
+    "Audio: notebook builtin režim přes webrtc_apm.",
+    "Hands-free: Realtime aktivní (server VAD).",
+    "Audio: nouzový režim degraded_no_aec bez AEC, s konzervativním capture gate. Důvod: reference_pipeline_unhealthy. Recovery: probe_richer_backend_again."
+  ]
+}

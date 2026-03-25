@@ -19,7 +19,6 @@ class ConversationAudioRuntimeController:
         *,
         estimate_voice_likelihood_from_pcm16,
         closed_pose_factory,
-        should_drop_mic_chunk,
         backend_aware_aec_metrics,
         state_speaking: str,
         echo_trailing_hold_s: float,
@@ -35,7 +34,6 @@ class ConversationAudioRuntimeController:
         )
         self._kwargs = {
             "estimate_voice_likelihood_from_pcm16": estimate_voice_likelihood_from_pcm16,
-            "should_drop_mic_chunk": should_drop_mic_chunk,
             "backend_aware_aec_metrics": backend_aware_aec_metrics,
         }
 
@@ -79,20 +77,17 @@ class ConversationAudioRuntimeLoop:
         *,
         stop_event,
         estimate_voice_likelihood_from_pcm16,
-        should_drop_mic_chunk,
         backend_aware_aec_metrics,
     ) -> None:
         self._bindings = bindings
         self.owner = bindings.owner
         self._stop_event = stop_event
         self._estimate_voice_likelihood_from_pcm16 = estimate_voice_likelihood_from_pcm16
-        self._should_drop_mic_chunk = should_drop_mic_chunk
         self._backend_aware_aec_metrics = backend_aware_aec_metrics
 
     def run(self) -> None:
         owner = self.owner
         while not self._stop_event.is_set():
-            gate_runtime = owner._session_manager.voice_gate_runtime
             self._bindings.tick_realtime()
             self._bindings.adapt_guard_if_needed()
 
@@ -141,60 +136,33 @@ class ConversationAudioRuntimeLoop:
                                 calibration_latency = 0
                                 reference = b""
                                 reference_stats = {"available_samples": 0, "total_samples": 0, "played_samples": 0, "callback_age_ms": -1}
-                            os_level_windows_aec = bool(
-                                owner._aec_mode == "windows_system_aec"
-                                and getattr(owner._native_aec_probe, "installed_driver", False)
-                            )
-                            aec_requires_reference = owner._aec_mode not in {"degraded_no_aec", "headset_clean"} and not os_level_windows_aec
+                            aec_requires_reference = owner._session_manager.aec_requires_reference()
                             reference_needed = owner._reference_needed_samples(len(chunk))
                             callback_age_ms = int(reference_stats.get("callback_age_ms", -1) or -1)
                             played_samples = int(reference_stats.get("played_samples", 0) or 0)
                             available_samples = int(reference_stats.get("available_samples", 0) or 0)
-                            reference_ready = not aec_requires_reference
-                            if aec_requires_reference:
-                                reference_ready = owner._is_reference_ready(
-                                    now_monotonic=time.monotonic(),
-                                    reference_needed=reference_needed,
-                                    available_samples=available_samples,
-                                    played_samples=played_samples,
-                                    callback_age_ms=callback_age_ms,
-                                )
-                            if aec_requires_reference and not reference_ready and gate_runtime.cached_echo_reference:
-                                cached_samples = len(gate_runtime.cached_echo_reference) // 2
-                                if owner._can_use_cached_reference(
-                                    now_monotonic=time.monotonic(),
-                                    reference_needed=reference_needed,
-                                    cached_samples=cached_samples,
-                                ):
-                                    reference = np.frombuffer(gate_runtime.cached_echo_reference, dtype=np.int16).copy()
-                                    reference_ready = True
-                                    available_samples = cached_samples
-                                    reference_stats = dict(reference_stats)
-                                    reference_stats["available_samples"] = cached_samples
-                                    reference_stats["callback_age_ms"] = max(0, callback_age_ms)
-                            elif (
-                                aec_requires_reference
-                                and not reference_ready
-                                and available_samples <= 0
-                                and gate_runtime.cached_echo_reference
-                                and played_samples > 0
-                                and (time.monotonic() - gate_runtime.cached_reference_at) <= 0.35
-                            ):
-                                cached_samples = len(gate_runtime.cached_echo_reference) // 2
-                                if cached_samples >= max(640, len(chunk) // 2):
-                                    reference = np.frombuffer(gate_runtime.cached_echo_reference, dtype=np.int16).copy()
-                                    reference_ready = True
-                                    available_samples = cached_samples
-                                    reference_stats = dict(reference_stats)
-                                    reference_stats["available_samples"] = cached_samples
-                                    reference_stats["callback_age_ms"] = max(0, callback_age_ms)
-                            if not aec_requires_reference:
+                            reference_choice = owner._session_manager.select_reference_source(
+                                aec_requires_reference=aec_requires_reference,
+                                now_monotonic=time.monotonic(),
+                                reference_needed=reference_needed,
+                                live_reference_pcm16=np.asarray(reference, dtype=np.int16).astype(np.int16, copy=False).tobytes() if len(reference) else b"",
+                                available_samples=available_samples,
+                                played_samples=played_samples,
+                                callback_age_ms=callback_age_ms,
+                            )
+                            reference_ready = bool(reference_choice.ready)
+                            reference_miss = bool(reference_choice.miss)
+                            if reference_choice.source.startswith("cached"):
+                                reference = np.frombuffer(reference_choice.reference_pcm16, dtype=np.int16).copy()
+                                reference_stats = dict(reference_stats)
+                                reference_stats["available_samples"] = reference_choice.available_samples
+                                reference_stats["callback_age_ms"] = reference_choice.callback_age_ms
+                            elif not aec_requires_reference:
                                 reference = np.empty((0,), dtype=np.int16)
-                            reference_miss = aec_requires_reference and not reference_ready
                             owner._session_manager.note_reference_health(
                                 ready=reference_ready,
-                                available_samples=int(reference_stats.get("available_samples", 0) or 0),
-                                callback_age_ms=int(reference_stats.get("callback_age_ms", -1) or -1),
+                                available_samples=int(reference_choice.available_samples),
+                                callback_age_ms=int(reference_choice.callback_age_ms),
                             )
                             if reference_ready:
                                 try:
@@ -339,25 +307,28 @@ class ConversationAudioRuntimeLoop:
                                 native_selected=native_selected,
                             )
                         effective_aec_quality = max(effective_aec_quality, 0.1 if webrtc_success else 0.0)
-                        gate_decision = self._should_drop_mic_chunk(
+                        now_for_diag = time.monotonic()
+                        gate_decision = owner._session_manager.evaluate_capture_gate(
                             mode=owner._mode,
                             guard_active=guard_active,
                             playback_active=is_playing_out,
                             similarity=effective_similarity,
                             input_level=in_level,
                             output_level=current_out_level,
+                            default_profile=owner.settings.normalized_audio_guard_profile(),
                             profile=owner._guard_profile,
-                            runtime=gate_runtime,
                             residual_level=residual_level,
                             voice_likelihood=voice_likelihood,
                             double_talk=double_talk,
                             aec_quality=effective_aec_quality,
+                            effective_similarity=effective_similarity,
+                            effective_aec_quality=effective_aec_quality,
+                            now_monotonic=now_for_diag,
                         )
                         drop_chunk = bool(gate_decision.drop_chunk)
                         drop_reason = str(gate_decision.drop_reason)
                         delay_drift = abs(int(owner._guard_calibration.get("latency_samples", 0) or 0) - int(aec_result.get("delay_samples", 0) or 0))
-                        now_for_diag = time.monotonic()
-                        diag_interval_s = 0.8 if (reference_miss or effective_similarity >= 0.4 or aec_backend == "webrtc" or aec_backend == "windows_native" or double_talk) else 5.0
+                        diag_interval_s = 0.8 if (reference_miss or effective_similarity >= 0.4 or aec_backend == "webrtc" or aec_backend == "windows_system_aec" or double_talk) else 5.0
                         should_log_problem_diag = bool(
                             guard_active
                             and owner._session_manager.should_log_problem_diag(
@@ -382,7 +353,7 @@ class ConversationAudioRuntimeLoop:
                             )
                             and (
                                 aec_backend == "webrtc"
-                                or aec_backend == "windows_native"
+                                or aec_backend == "windows_system_aec"
                                 or webrtc_success
                                 or (not reference_miss and effective_similarity >= 0.2)
                                 or (not reference_miss and predicted_level > 0.0 and improvement_ratio > 0.0)
@@ -428,12 +399,9 @@ class ConversationAudioRuntimeLoop:
                             aec_quality=effective_aec_quality,
                             double_talk=double_talk,
                         )
-                        gate_outcome = owner._session_manager.record_gate_outcome(
-                            drop_chunk=drop_chunk,
-                            barge_in_candidate=barge_in_candidate,
-                        )
+                        gate_outcome = gate_decision.side_effects
                         if barge_in_confirmed and is_playing_out:
-                            owner._session_manager.note_barge_in_transition()
+                            owner._session_manager.note_user_turn_committed()
                         if drop_chunk:
                             owner._last_in_level = 0.0
                             if gate_outcome.should_log_echo_drop:
@@ -447,7 +415,7 @@ class ConversationAudioRuntimeLoop:
                                 )
                             continue
                         owner._last_in_level = in_level
-                        rt = owner._rt
+                        rt = owner._session_manager.transport.realtime
                         if rt is None:
                             continue
                         try:

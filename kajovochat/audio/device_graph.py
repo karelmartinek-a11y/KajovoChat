@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from ..services.audio_service import AudioPlayer, DuplexAudioSession, RealtimeMicStream
+from .io import AudioPlayer, DuplexAudioSession, RealtimeMicStream
 
 
 @dataclass

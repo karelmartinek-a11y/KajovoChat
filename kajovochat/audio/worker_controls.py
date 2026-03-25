@@ -26,7 +26,7 @@ class ConversationAudioWorkerControls:
         owner._stop_all.set()
         owner._mode = "idle"
         owner._session_manager.shutdown_runtime_resources()
-        owner._transport_runtime.reset()
+        owner._session_manager.reset_runtime_tracking()
         owner._session_manager.reset_voice_gate_runtime()
         owner.input_level.emit(0.0)
         owner.output_level.emit(0.0)
@@ -53,5 +53,4 @@ class ConversationAudioWorkerControls:
 
     def ptt_released(self) -> None:
         owner = self._owner
-        owner._awaiting_transcript = True
         owner._session_manager.ptt_released()

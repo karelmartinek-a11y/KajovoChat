@@ -1,0 +1,12 @@
+{
+  "scenario": "start_handsfree_session",
+  "kind": "integration",
+  "backend_chain": [
+    "windows_system_aec"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "Hands-free: Realtime aktivní (server VAD)."
+  ]
+}

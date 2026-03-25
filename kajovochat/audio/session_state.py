@@ -5,16 +5,20 @@ from enum import Enum
 
 class SessionState(str, Enum):
     IDLE = "idle"
-    INITIALIZING = "initializing"
-    CALIBRATING = "calibrating"
-    READY = "ready"
-    ASSISTANT_RENDERING = "assistant_rendering"
-    DOUBLE_TALK = "double_talk"
-    BARGE_IN_TRANSITION = "barge_in_transition"
-    RECOVERING = "recovering"
+    STARTING = "starting"
+    PROBING = "probing"
+    ACTIVE = "active"
     DEGRADED = "degraded"
+    RECOVERING = "recovering"
     STOPPING = "stopping"
     FAILED = "failed"
+
+
+class SessionPresentationState(str, Enum):
+    THINKING = "thinking"
+    SPEAKING = "speaking"
+    TRANSCRIBING = "transcribing"
+    QUIESCENT = "quiescent"
 
 
 class SessionTransitionError(RuntimeError):
@@ -22,76 +26,14 @@ class SessionTransitionError(RuntimeError):
 
 
 _ALLOWED_TRANSITIONS: dict[SessionState, set[SessionState]] = {
-    SessionState.IDLE: {SessionState.INITIALIZING, SessionState.STOPPING, SessionState.FAILED},
-    SessionState.INITIALIZING: {SessionState.CALIBRATING, SessionState.IDLE, SessionState.STOPPING, SessionState.FAILED},
-    SessionState.CALIBRATING: {
-        SessionState.READY,
-        SessionState.DEGRADED,
-        SessionState.RECOVERING,
-        SessionState.IDLE,
-        SessionState.STOPPING,
-        SessionState.FAILED,
-    },
-    SessionState.READY: {
-        SessionState.ASSISTANT_RENDERING,
-        SessionState.DOUBLE_TALK,
-        SessionState.BARGE_IN_TRANSITION,
-        SessionState.RECOVERING,
-        SessionState.DEGRADED,
-        SessionState.STOPPING,
-        SessionState.FAILED,
-    },
-    SessionState.ASSISTANT_RENDERING: {
-        SessionState.READY,
-        SessionState.DOUBLE_TALK,
-        SessionState.BARGE_IN_TRANSITION,
-        SessionState.RECOVERING,
-        SessionState.DEGRADED,
-        SessionState.STOPPING,
-        SessionState.FAILED,
-    },
-    SessionState.DOUBLE_TALK: {
-        SessionState.READY,
-        SessionState.ASSISTANT_RENDERING,
-        SessionState.BARGE_IN_TRANSITION,
-        SessionState.RECOVERING,
-        SessionState.DEGRADED,
-        SessionState.STOPPING,
-        SessionState.FAILED,
-    },
-    SessionState.BARGE_IN_TRANSITION: {
-        SessionState.READY,
-        SessionState.ASSISTANT_RENDERING,
-        SessionState.RECOVERING,
-        SessionState.DEGRADED,
-        SessionState.STOPPING,
-        SessionState.FAILED,
-    },
-    SessionState.RECOVERING: {SessionState.READY, SessionState.DEGRADED, SessionState.STOPPING, SessionState.FAILED},
-    SessionState.DEGRADED: {
-        SessionState.RECOVERING,
-        SessionState.READY,
-        SessionState.ASSISTANT_RENDERING,
-        SessionState.BARGE_IN_TRANSITION,
-        SessionState.STOPPING,
-        SessionState.FAILED,
-    },
+    SessionState.IDLE: {SessionState.STARTING, SessionState.FAILED},
+    SessionState.STARTING: {SessionState.PROBING, SessionState.FAILED},
+    SessionState.PROBING: {SessionState.ACTIVE, SessionState.DEGRADED, SessionState.FAILED},
+    SessionState.ACTIVE: {SessionState.RECOVERING, SessionState.STOPPING, SessionState.FAILED},
+    SessionState.DEGRADED: {SessionState.RECOVERING, SessionState.STOPPING, SessionState.FAILED},
+    SessionState.RECOVERING: {SessionState.ACTIVE, SessionState.DEGRADED, SessionState.STOPPING, SessionState.FAILED},
     SessionState.STOPPING: {SessionState.IDLE, SessionState.FAILED},
-    SessionState.FAILED: {SessionState.IDLE, SessionState.INITIALIZING},
-}
-
-_SESSION_UI_STATE_MAP: dict[SessionState, str] = {
-    SessionState.IDLE: "idle",
-    SessionState.INITIALIZING: "connecting",
-    SessionState.CALIBRATING: "connecting",
-    SessionState.READY: "listening",
-    SessionState.ASSISTANT_RENDERING: "speaking",
-    SessionState.DOUBLE_TALK: "listening",
-    SessionState.BARGE_IN_TRANSITION: "transcribing",
-    SessionState.RECOVERING: "reconnecting",
-    SessionState.DEGRADED: "listening",
-    SessionState.STOPPING: "idle",
-    SessionState.FAILED: "error",
+    SessionState.FAILED: {SessionState.IDLE},
 }
 
 
@@ -110,5 +52,21 @@ def validate_session_transition(current: SessionState, target: SessionState) -> 
     require_session_transition(current, target)
 
 
-def session_state_to_ui_state(state: SessionState) -> str:
-    return _SESSION_UI_STATE_MAP.get(state, "idle")
+def session_state_to_ui_state(state: SessionState, presentation: SessionPresentationState | None = None) -> str:
+    if state in {SessionState.IDLE, SessionState.STOPPING}:
+        return "idle"
+    if state in {SessionState.STARTING, SessionState.PROBING}:
+        return "connecting"
+    if state == SessionState.RECOVERING:
+        return "reconnecting"
+    if state == SessionState.FAILED:
+        return "error"
+    if presentation == SessionPresentationState.SPEAKING:
+        return "speaking"
+    if presentation == SessionPresentationState.THINKING:
+        return "thinking"
+    if presentation == SessionPresentationState.TRANSCRIBING:
+        return "transcribing"
+    if presentation == SessionPresentationState.QUIESCENT:
+        return "idle"
+    return "listening"

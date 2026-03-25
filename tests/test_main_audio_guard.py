@@ -8,13 +8,13 @@ from kajovochat.main import (
     _TTS_SPEED,
     _TTS_VOICE,
     _backend_aware_aec_metrics,
-    _should_drop_mic_chunk,
     ConversationWorker,
     run_audio_guard_selftest,
 )
+from kajovochat.audio.voice_gate import should_drop_mic_chunk
 from kajovochat.settings import AppSettings, DEFAULT_AUDIO_GUARD_PROFILE
-from kajovochat.services.audio_service import build_device_fingerprint, calibrate_audio_devices_advanced
-from kajovochat.services.windows_native_aec import WindowsNativeAECProbe
+from kajovochat.audio.devices import build_device_fingerprint, calibrate_audio_devices_advanced
+from kajovochat.audio.windows_system_aec import WindowsSystemAecProbe
 import math
 import numpy as np
 import time
@@ -53,13 +53,13 @@ def test_realtime_config_is_hardcoded_and_not_user_tunable(monkeypatch) -> None:
         holder["service"] = service
         return service
 
-    monkeypatch.setattr("kajovochat.main.RealtimeService", _factory)
+    monkeypatch.setattr("kajovochat.audio.transport_bridge.RealtimeService", _factory)
 
     settings = AppSettings(answer_language_mode="fixed", fixed_answer_language="fr", response_style="stručný")
     settings.openai_api_key = "sk-test-123"
     worker = ConversationWorker(settings)
 
-    worker._ensure_realtime("server_vad")
+    worker._session_manager.transport.ensure_connected("server_vad")
     service = holder["service"]
 
     assert service.cfg.model == _REALTIME_MODEL
@@ -72,7 +72,8 @@ def test_realtime_config_is_hardcoded_and_not_user_tunable(monkeypatch) -> None:
 
 
 def test_echo_chunks_are_dropped_when_similarity_is_high() -> None:
-    dropped, reason = _should_drop_mic_chunk(
+    dropped, reason = should_drop_mic_chunk(
+        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
         mode="handsfree",
         guard_active=True,
         playback_active=True,
@@ -86,7 +87,8 @@ def test_echo_chunks_are_dropped_when_similarity_is_high() -> None:
 
 
 def test_user_voice_passes_when_similarity_is_low() -> None:
-    dropped, reason = _should_drop_mic_chunk(
+    dropped, reason = should_drop_mic_chunk(
+        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
         mode="handsfree",
         guard_active=True,
         playback_active=True,
@@ -207,7 +209,7 @@ def test_advanced_calibration_tries_fallback_samplerates(monkeypatch) -> None:
             },
         )()
 
-    monkeypatch.setattr("kajovochat.services.audio_service.calibrate_audio_devices", _fake_calibrate)
+    monkeypatch.setattr("kajovochat.audio.devices.calibrate_audio_devices", _fake_calibrate)
 
     result = calibrate_audio_devices_advanced(input_device=1, output_device=2, samplerate=24000)
 
@@ -217,7 +219,8 @@ def test_advanced_calibration_tries_fallback_samplerates(monkeypatch) -> None:
 
 
 def test_double_talk_is_not_dropped_when_voice_is_strong() -> None:
-    dropped, reason = _should_drop_mic_chunk(
+    dropped, reason = should_drop_mic_chunk(
+        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
         mode="handsfree",
         guard_active=True,
         playback_active=True,
@@ -271,8 +274,8 @@ def test_saved_calibration_applies_runtime_aec_and_frame_size() -> None:
     assert worker._aec.filter_length == 1024
     assert worker._aec.last_shift == 320
     assert worker._aec.max_shift_samples >= 960
-    assert worker._player is not None
-    assert worker._player.blocksize == 960
+    assert worker._runtime_resources.player is not None
+    assert worker._runtime_resources.player.blocksize == 960
 
 
 def test_conversation_worker_normalizes_aec_mode_from_settings() -> None:
@@ -313,8 +316,8 @@ def test_webrtc_apm_mode_keeps_far_drift_guardrails() -> None:
 
 def test_guard_debug_includes_native_aec_probe(monkeypatch) -> None:
     monkeypatch.setattr(
-        "kajovochat.main.probe_windows_native_aec",
-        lambda: WindowsNativeAECProbe(False, "helper absent"),
+        "kajovochat.main.probe_windows_system_aec",
+        lambda: WindowsSystemAecProbe(False, "Windows System AEC backend není připraven."),
     )
     worker = ConversationWorker(AppSettings())
     captured: dict[str, object] = {}
@@ -323,7 +326,7 @@ def test_guard_debug_includes_native_aec_probe(monkeypatch) -> None:
     worker._emit_guard_debug()
 
     assert captured["native_aec_available"] is False
-    assert captured["native_aec_reason"] == "helper absent"
+    assert captured["native_aec_reason"] == "Windows System AEC backend není připraven."
 
 
 def test_aec_output_drives_guard_to_drop_pure_echo_but_keep_double_talk() -> None:
@@ -355,7 +358,8 @@ def test_aec_output_drives_guard_to_drop_pure_echo_but_keep_double_talk() -> Non
     )
     echo_pcm = bytes(echo_result["pcm"])
     echo_level = worker._pcm16_level(echo_pcm)
-    echo_drop, echo_reason = _should_drop_mic_chunk(
+    echo_drop, echo_reason = should_drop_mic_chunk(
+        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
         mode="handsfree",
         guard_active=True,
         playback_active=True,
@@ -377,7 +381,8 @@ def test_aec_output_drives_guard_to_drop_pure_echo_but_keep_double_talk() -> Non
     )
     mixed_pcm = bytes(mixed_result["pcm"])
     mixed_level = worker._pcm16_level(mixed_pcm)
-    mixed_drop, mixed_reason = _should_drop_mic_chunk(
+    mixed_drop, mixed_reason = should_drop_mic_chunk(
+        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
         mode="handsfree",
         guard_active=True,
         playback_active=True,
@@ -492,77 +497,68 @@ def test_runtime_latency_update_rejects_far_webrtc_jump() -> None:
     assert worker._guard_calibration["latency_samples"] == 540
 
 
-def test_reference_ready_allows_early_start_when_played_samples_are_available() -> None:
+def test_reference_selection_prefers_live_reference_when_playback_is_warm() -> None:
     worker = ConversationWorker(AppSettings())
-    worker._playback_reference_armed = True
-    worker._reference_warmup_until = time.monotonic() + 1.0
+    runtime = worker._session_manager.voice_gate_runtime
+    runtime.playback_reference_armed = True
+    runtime.reference_warmup_until = time.monotonic() + 1.0
 
     needed = worker._reference_needed_samples(1920)
-    ready = worker._is_reference_ready(
+    decision = worker._session_manager.select_reference_source(
+        aec_requires_reference=True,
         now_monotonic=time.monotonic(),
         reference_needed=needed,
+        live_reference_pcm16=(np.arange(needed + 128, dtype=np.int16)).tobytes(),
         available_samples=needed + 64,
         played_samples=max(needed // 2, 480),
         callback_age_ms=-1,
     )
 
-    assert ready is True
+    assert decision.ready is True
+    assert decision.source == "live"
 
 
-def test_reference_ready_tolerates_unknown_callback_age_when_playback_is_warm() -> None:
+def test_reference_selection_falls_back_to_cached_reference_when_live_is_not_ready() -> None:
     worker = ConversationWorker(AppSettings())
-    worker._playback_reference_armed = True
-    worker._reference_warmup_until = time.monotonic() + 1.0
+    runtime = worker._session_manager.voice_gate_runtime
+    runtime.playback_reference_armed = True
+    runtime.reference_warmup_until = time.monotonic() + 1.0
+    runtime.cached_reference_at = time.monotonic()
+    runtime.cached_echo_reference = (np.arange(840, dtype=np.int16)).tobytes()
 
-    needed = worker._reference_needed_samples(1920)
-    ready = worker._is_reference_ready(
+    decision = worker._session_manager.select_reference_source(
+        aec_requires_reference=True,
         now_monotonic=time.monotonic(),
-        reference_needed=needed,
-        available_samples=needed + 128,
-        played_samples=max(needed // 4, 240),
+        reference_needed=720,
+        live_reference_pcm16=b"",
+        available_samples=0,
+        played_samples=360,
         callback_age_ms=-1,
     )
 
-    assert ready is True
+    assert decision.ready is True
+    assert decision.source in {"cached", "cached_tail"}
+    assert len(decision.reference_pcm16) == len(runtime.cached_echo_reference)
 
 
-def test_cached_reference_fallback_accepts_recent_nearly_full_tail() -> None:
+def test_voice_gate_snapshot_exposes_centralized_runtime_counters() -> None:
     worker = ConversationWorker(AppSettings())
-    worker._cached_reference_at = time.monotonic()
+    runtime = worker._session_manager.voice_gate_runtime
+    runtime.echo_drop_count = 2
+    runtime.barge_in_chunk_count = 3
+    runtime.playback_reference_armed = True
+    runtime.cached_echo_reference = (np.arange(720, dtype=np.int16)).tobytes()
+    runtime.cached_reference_at = time.monotonic()
 
-    needed = worker._reference_needed_samples(1920)
-    assert worker._can_use_cached_reference(
-        now_monotonic=time.monotonic(),
-        reference_needed=needed,
-        cached_samples=needed - 120,
-    ) is True
+    snapshot = worker._session_manager.voice_gate_snapshot(now_monotonic=time.monotonic())
 
-
-def test_cached_reference_fallback_allows_smaller_recent_tail() -> None:
-    worker = ConversationWorker(AppSettings())
-    worker._cached_reference_at = time.monotonic()
-
-    needed = worker._reference_needed_samples(1920)
-    assert worker._can_use_cached_reference(
-        now_monotonic=time.monotonic(),
-        reference_needed=needed,
-        cached_samples=needed - 280,
-    ) is True
+    assert snapshot.echo_drop_count == 2
+    assert snapshot.barge_in_chunk_count == 3
+    assert snapshot.playback_reference_armed is True
+    assert snapshot.cached_reference_samples == 720
 
 
-def test_cached_reference_fallback_allows_zero_available_samples_when_recent() -> None:
-    worker = ConversationWorker(AppSettings())
-    worker._cached_reference_at = time.monotonic()
-    worker._cached_echo_reference = (np.arange(720, dtype=np.int16)).tobytes()
-
-    assert worker._can_use_cached_reference(
-        now_monotonic=time.monotonic(),
-        reference_needed=720,
-        cached_samples=720,
-    ) is True
-
-
-def test_stop_realtime_session_stops_loop_before_clearing_rt(monkeypatch) -> None:
+def test_shutdown_runtime_resources_stops_loop_before_clearing_rt() -> None:
     worker = ConversationWorker(AppSettings())
     events: list[str] = []
 
@@ -570,10 +566,12 @@ def test_stop_realtime_session_stops_loop_before_clearing_rt(monkeypatch) -> Non
         def close(self) -> None:
             events.append("close_rt")
 
-    worker._rt = _FakeRT()
+    fake_rt = _FakeRT()
+    worker._runtime_resources.rt = fake_rt
+    worker._session_manager.transport.realtime = fake_rt
     worker._stop_rt_loop = lambda timeout_s=1.0: events.append("stop_loop")  # type: ignore[method-assign]
 
-    worker._stop_realtime_session()
+    worker._session_manager.shutdown_runtime_resources()
 
     assert events[:2] == ["stop_loop", "close_rt"]
 
@@ -586,7 +584,9 @@ def test_request_stop_stops_loop_before_clearing_rt() -> None:
         def close(self) -> None:
             events.append("close_rt")
 
-    worker._rt = _FakeRT()
+    fake_rt = _FakeRT()
+    worker._runtime_resources.rt = fake_rt
+    worker._session_manager.transport.realtime = fake_rt
     worker._stop_rt_loop = lambda timeout_s=1.0: events.append("stop_loop")  # type: ignore[method-assign]
 
     worker.request_stop()
@@ -612,7 +612,7 @@ def test_backend_aware_metrics_promote_successful_webrtc_block() -> None:
 
 def test_backend_aware_metrics_promote_selected_windows_native_block() -> None:
     effective_similarity, effective_quality = _backend_aware_aec_metrics(
-        backend="windows_native",
+        backend="windows_system_aec",
         similarity=0.16,
         aec_quality=0.02,
         improvement_ratio=0.64,

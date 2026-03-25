@@ -1,0 +1,370 @@
+{
+  "session_state": "active",
+  "requested_backend": "windows_system_aec",
+  "selected_backend": "windows_system_aec",
+  "product_mode_key": "notebook_builtin_windows_system_aec",
+  "product_status": "Notebook builtin + Windows System AEC",
+  "capture_gate_policy": "windows_system_aec",
+  "recovery_policy": "prefer_current_until_failure",
+  "fallback_chain_step": 0,
+  "fallback_reason": "",
+  "degradation_cause": "",
+  "reconnect_attempts": 0,
+  "recovery_attempts_total": 0,
+  "recovery_successes_total": 0,
+  "recovery_failures_total": 0,
+  "xrun_events_total": 0,
+  "device_resets_total": 0,
+  "reference_health_timeline": [
+    {
+      "mono_ts": 3535.800052,
+      "ready": false,
+      "available_samples": 0,
+      "callback_age_ms": 90,
+      "state": "missing"
+    },
+    {
+      "mono_ts": 3535.800061,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.800556,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.80099,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.801381,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.801795,
+      "ready": false,
+      "available_samples": 0,
+      "callback_age_ms": 90,
+      "state": "missing"
+    },
+    {
+      "mono_ts": 3535.801803,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.802236,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.80263,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.803334,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.80379,
+      "ready": false,
+      "available_samples": 0,
+      "callback_age_ms": 90,
+      "state": "missing"
+    },
+    {
+      "mono_ts": 3535.803802,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.804363,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.804823,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.805303,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.80575,
+      "ready": false,
+      "available_samples": 0,
+      "callback_age_ms": 90,
+      "state": "missing"
+    },
+    {
+      "mono_ts": 3535.805757,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.80625,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.80672,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.80776,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.808351,
+      "ready": false,
+      "available_samples": 0,
+      "callback_age_ms": 90,
+      "state": "missing"
+    },
+    {
+      "mono_ts": 3535.80836,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.808885,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.814004,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.814713,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.815346,
+      "ready": false,
+      "available_samples": 0,
+      "callback_age_ms": 90,
+      "state": "missing"
+    },
+    {
+      "mono_ts": 3535.815354,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.815865,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.816457,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.816974,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.817596,
+      "ready": false,
+      "available_samples": 0,
+      "callback_age_ms": 90,
+      "state": "missing"
+    },
+    {
+      "mono_ts": 3535.817603,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.818142,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.818705,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.898026,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.898608,
+      "ready": false,
+      "available_samples": 0,
+      "callback_age_ms": 90,
+      "state": "missing"
+    },
+    {
+      "mono_ts": 3535.898616,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.899194,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.899784,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    },
+    {
+      "mono_ts": 3535.900411,
+      "ready": true,
+      "available_samples": 480,
+      "callback_age_ms": 24,
+      "state": "ready"
+    }
+  ],
+  "recovery_story": [
+    {
+      "mono_ts": 3535.799772,
+      "category": "session",
+      "reason": "session_started",
+      "action": "start",
+      "session_state": "starting",
+      "selected_backend": "windows_system_aec",
+      "target_backend": "windows_system_aec",
+      "cooldown_s": 0.0
+    },
+    {
+      "mono_ts": 3535.799849,
+      "category": "session",
+      "reason": "backend_probe_started",
+      "action": "probe",
+      "session_state": "probing",
+      "selected_backend": "windows_system_aec",
+      "target_backend": "",
+      "cooldown_s": 0.0
+    },
+    {
+      "mono_ts": 3535.799864,
+      "category": "backend_probe",
+      "reason": "backend_probe",
+      "action": "probe_selected",
+      "session_state": "probing",
+      "selected_backend": "windows_system_aec",
+      "target_backend": "windows_system_aec",
+      "cooldown_s": 0.0,
+      "detail": {
+        "degraded": false
+      }
+    }
+  ],
+  "backend_health_score": 1.0,
+  "timings": {
+    "session_start_mono": 3535.799766,
+    "session_probe_start_mono": 3535.799848,
+    "session_probe_done_mono": 3535.799863,
+    "session_active_mono": 3535.799965,
+    "session_stop_mono": 0.0,
+    "uptime_s": 0.101,
+    "active_for_s": 0.101,
+    "probe_duration_s": 0.0,
+    "last_server_activity_age_s": 0.0
+  },
+  "turn_latency": {
+    "turns_total": 0,
+    "responses_completed_total": 32,
+    "avg_first_audio_latency_ms": 2.469,
+    "max_first_audio_latency_ms": 79,
+    "avg_response_latency_ms": 0.0,
+    "max_response_latency_ms": 0
+  },
+  "health": {
+    "reference_ready": true,
+    "reference_health_state": "ready",
+    "reference_available_samples": 480,
+    "reference_callback_age_ms": 24,
+    "reference_ready_events": 32,
+    "reference_miss_events": 8,
+    "reference_consecutive_misses": 0,
+    "poor_aec_events": 0,
+    "poor_aec_consecutive": 0,
+    "last_failure_reason": "",
+    "pending_events": 0,
+    "pending_mic_chunks": 0,
+    "pending_player_bytes": 0
+  }
+}

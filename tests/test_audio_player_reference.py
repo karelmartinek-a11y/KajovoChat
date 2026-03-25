@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from kajovochat.services.audio_service import AudioPlayer, DuplexAudioSession
+from kajovochat.audio.io import AudioPlayer, DuplexAudioSession
 
 
 def test_audio_player_echo_reference_tracks_played_target_samples() -> None:

@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 
 class ConversationAudioRuntimeBindings:
-    """Explicitní kontrakt mezi realtime smyčkou a worker/session vrstvou."""
+    """Explicitní kontrakt mezi realtime smyčkou a session vrstvou."""
 
     def __init__(
         self,
@@ -26,10 +26,11 @@ class ConversationAudioRuntimeBindings:
 
     def tick_realtime(self) -> None:
         owner = self._owner
-        owner._attempt_reconnect_if_needed()
-        if owner._rt:
-            owner._rt.pump_events()
-        owner._check_runtime_health()
+        owner._session_manager.tick()
+        rt = owner._session_manager.transport.realtime
+        if rt is not None:
+            rt.pump_events()
+        owner._session_manager.check_runtime_health()
 
     def adapt_guard_if_needed(self) -> None:
         owner = self._owner
@@ -66,7 +67,7 @@ class ConversationAudioRuntimeBindings:
             is_playing_out = (
                 buffered > 0
                 or current_out_level > float(owner._guard_profile["playback_activity_level"])
-                or owner._ui_state == self._state_speaking
+                or owner.ui_state == self._state_speaking
             )
             owner._session_manager.note_playback_activity(
                 is_playing_out=is_playing_out,
@@ -80,18 +81,20 @@ class ConversationAudioRuntimeBindings:
 
     def has_active_capture(self, duplex: object | None) -> bool:
         owner = self._owner
-        return bool(owner._mic_enabled.is_set() and (duplex is not None or owner._mic is not None) and owner._rt is not None)
+        runtime = owner._runtime_resources
+        return bool(owner._session_manager.mic_enabled.is_set() and (duplex is not None or runtime.mic is not None) and owner._session_manager.transport.realtime is not None)
 
     def capture_queue_for(self, duplex: object | None):
         owner = self._owner
-        return duplex.queue if duplex is not None else owner._mic.queue
+        runtime = owner._runtime_resources
+        return duplex.queue if duplex is not None else runtime.mic.queue
 
     def emit_levels(self, *, out_pose: dict[str, object]) -> None:
         owner = self._owner
         now = time.time()
         if now - owner._last_level_emit_t < 0.016:
             return
-        in_lvl = owner._last_in_level if owner._mic_enabled.is_set() else 0.0
+        in_lvl = owner._last_in_level if owner._session_manager.mic_enabled.is_set() else 0.0
         out_lvl = owner._last_out_level
         owner.input_level.emit(float(in_lvl))
         owner.output_level.emit(float(out_lvl))

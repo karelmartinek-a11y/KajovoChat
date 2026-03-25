@@ -186,3 +186,83 @@ def test_voice_gate_requires_longer_barge_in_streak_during_tts_hold() -> None:
     assert first.barge_in_confirmed is False
     assert second.barge_in_confirmed is False
     assert third.barge_in_confirmed is True
+
+
+def test_degraded_no_aec_policy_is_more_conservative_than_standard() -> None:
+    runtime_standard = VoiceGateRuntimeState()
+    runtime_degraded = VoiceGateRuntimeState()
+    profile = {
+        "echo_similarity_drop": 0.8,
+        "echo_similarity_soft": 0.6,
+        "barge_in_min_input_level": 0.06,
+        "barge_in_output_ratio": 1.35,
+    }
+
+    standard = evaluate_capture_gate(
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=0.12,
+        input_level=0.11,
+        output_level=0.05,
+        default_profile=profile,
+        runtime=runtime_standard,
+        voice_likelihood=0.6,
+        aec_quality=0.2,
+    )
+    degraded = evaluate_capture_gate(
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=0.12,
+        input_level=0.11,
+        output_level=0.05,
+        default_profile=profile,
+        runtime=runtime_degraded,
+        voice_likelihood=0.6,
+        aec_quality=0.2,
+        capture_gate_policy="degraded_no_aec",
+    )
+
+    assert standard.barge_in_candidate is True
+    assert degraded.barge_in_candidate is False
+    assert degraded.capture_gate_policy == "degraded_no_aec"
+
+
+def test_headset_clean_policy_disables_echo_drop() -> None:
+    profile = {
+        "echo_similarity_drop": 0.8,
+        "echo_similarity_soft": 0.6,
+        "barge_in_min_input_level": 0.06,
+        "barge_in_output_ratio": 1.35,
+    }
+
+    standard = evaluate_capture_gate(
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=0.92,
+        input_level=0.015,
+        output_level=0.08,
+        default_profile=profile,
+        runtime=VoiceGateRuntimeState(),
+        voice_likelihood=0.05,
+        aec_quality=0.01,
+    )
+    headset = evaluate_capture_gate(
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=0.92,
+        input_level=0.015,
+        output_level=0.08,
+        default_profile=profile,
+        runtime=VoiceGateRuntimeState(),
+        voice_likelihood=0.05,
+        aec_quality=0.01,
+        capture_gate_policy="headset_clean",
+    )
+
+    assert standard.drop_chunk is True
+    assert headset.drop_chunk is False
+    assert headset.capture_gate_policy == "headset_clean"

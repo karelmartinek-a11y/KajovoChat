@@ -78,7 +78,6 @@ class RealtimeTransportBridge:
         if self.realtime is None or not self.realtime.is_connected:
             self.realtime = RealtimeService(cfg)
             self._wire_callbacks(self.realtime)
-            self._state_sink("connecting" if reconnect_attempts == 0 else "reconnecting")
             self.realtime.connect()
             self._activity_sink()
             return self.realtime
@@ -96,6 +95,17 @@ class RealtimeTransportBridge:
         self._activity_sink()
         return self.realtime
 
+
+    @property
+    def is_connected(self) -> bool:
+        return bool(self.realtime is not None and self.realtime.is_connected)
+
+    def connection_health_snapshot(self) -> dict[str, object]:
+        return {
+            "turn_mode": self.turn_mode,
+            "is_connected": self.is_connected,
+            "has_realtime": self.realtime is not None,
+        }
     def close(self) -> None:
         try:
             if self.realtime:

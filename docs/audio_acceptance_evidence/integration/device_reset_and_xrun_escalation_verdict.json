@@ -1,0 +1,14 @@
+{
+  "scenario": "device_reset_and_xrun_escalation",
+  "kind": "integration",
+  "backend_chain": [
+    "windows_system_aec",
+    "webrtc_apm"
+  ],
+  "final_state": "active",
+  "verdict": "PASS",
+  "captions": [
+    "Hands-free: Realtime aktivní (server VAD).",
+    "Audio: fallback windows_system_aec -> webrtc_apm (device_unavailable)."
+  ]
+}

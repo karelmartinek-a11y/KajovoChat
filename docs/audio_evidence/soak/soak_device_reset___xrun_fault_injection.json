@@ -1,0 +1,935 @@
+{
+  "scenario": "soak: device reset / xrun fault injection",
+  "verification": "kombinovaný xrun + device reset fault injection",
+  "expected_final_state": "degraded",
+  "backend_chain": [
+    "windows_system_aec",
+    "webrtc_apm",
+    "degraded_no_aec"
+  ],
+  "pass_fail": "PASS",
+  "requested_backend": "windows_system_aec",
+  "selected_backend": "degraded_no_aec",
+  "session_state": "degraded",
+  "telemetry_snapshot": {
+    "session_state": "degraded",
+    "requested_backend": "windows_system_aec",
+    "selected_backend": "degraded_no_aec",
+    "product_mode_key": "notebook_builtin_degraded_no_aec",
+    "product_status": "Nouzový režim bez AEC",
+    "capture_gate_policy": "degraded_no_aec",
+    "recovery_policy": "probe_richer_backend_again",
+    "fallback_chain_step": 2,
+    "fallback_reason": "device_unavailable",
+    "degradation_cause": "device_unavailable",
+    "reconnect_attempts": 0,
+    "recovery_attempts_total": 0,
+    "recovery_successes_total": 0,
+    "recovery_failures_total": 0,
+    "xrun_events_total": 3,
+    "device_resets_total": 2,
+    "reference_health_timeline": [],
+    "recovery_story": [
+      {
+        "mono_ts": 2813.686137,
+        "category": "session",
+        "reason": "session_started",
+        "action": "start",
+        "session_state": "starting",
+        "selected_backend": "windows_system_aec",
+        "target_backend": "windows_system_aec",
+        "cooldown_s": 0.0
+      },
+      {
+        "mono_ts": 2813.686229,
+        "category": "session",
+        "reason": "backend_probe_started",
+        "action": "probe",
+        "session_state": "probing",
+        "selected_backend": "windows_system_aec",
+        "target_backend": "",
+        "cooldown_s": 0.0
+      },
+      {
+        "mono_ts": 2813.686249,
+        "category": "backend_probe",
+        "reason": "windows_system_aec_unavailable",
+        "action": "probe_fallback",
+        "session_state": "probing",
+        "selected_backend": "windows_system_aec",
+        "target_backend": "webrtc_apm",
+        "cooldown_s": 0.0,
+        "detail": {
+          "degraded": false
+        }
+      },
+      {
+        "mono_ts": 2813.686746,
+        "category": "fallback",
+        "reason": "device_unavailable",
+        "action": "backend_fallback",
+        "session_state": "recovering",
+        "selected_backend": "webrtc_apm",
+        "target_backend": "degraded_no_aec",
+        "cooldown_s": 8.0,
+        "detail": {
+          "source": "duplex",
+          "xrun_events_total": 3
+        }
+      },
+      {
+        "mono_ts": 2813.686763,
+        "category": "fallback",
+        "reason": "device_unavailable",
+        "action": "suppressed",
+        "session_state": "degraded",
+        "selected_backend": "degraded_no_aec",
+        "target_backend": "",
+        "cooldown_s": 8.0,
+        "detail": {
+          "source": "render",
+          "device_resets_total": 2
+        }
+      }
+    ],
+    "backend_health_score": 0.62,
+    "timings": {
+      "session_start_mono": 2813.686131,
+      "session_probe_start_mono": 2813.686228,
+      "session_probe_done_mono": 2813.686247,
+      "session_active_mono": 2813.686337,
+      "session_stop_mono": 0.0,
+      "uptime_s": 0.001,
+      "active_for_s": 0.0,
+      "probe_duration_s": 0.0,
+      "last_server_activity_age_s": 0.001
+    },
+    "turn_latency": {
+      "turns_total": 0,
+      "responses_completed_total": 0,
+      "avg_first_audio_latency_ms": 0.0,
+      "max_first_audio_latency_ms": 0,
+      "avg_response_latency_ms": 0.0,
+      "max_response_latency_ms": 0
+    },
+    "health": {
+      "reference_ready": false,
+      "reference_health_state": "starting",
+      "reference_available_samples": 0,
+      "reference_callback_age_ms": -1,
+      "reference_ready_events": 0,
+      "reference_miss_events": 0,
+      "reference_consecutive_misses": 0,
+      "poor_aec_events": 0,
+      "poor_aec_consecutive": 0,
+      "last_failure_reason": "device_unavailable",
+      "pending_events": 0,
+      "pending_mic_chunks": 0,
+      "pending_player_bytes": 0
+    }
+  },
+  "session_state_story": [
+    "starting",
+    "probing",
+    "active",
+    "recovering",
+    "recovering",
+    "degraded"
+  ],
+  "recovery_actions": [
+    "start",
+    "probe",
+    "probe_fallback",
+    "backend_fallback",
+    "suppressed"
+  ],
+  "captions": [
+    "Audio: notebook builtin režim přes webrtc_apm.",
+    "Hands-free: Realtime aktivní (server VAD).",
+    "Audio: nouzový režim degraded_no_aec bez AEC, s konzervativním capture gate. Důvod: device_unavailable. Recovery: probe_richer_backend_again."
+  ],
+  "log_excerpt": [
+    {
+      "record_type": "audio_xrun",
+      "payload": {
+        "source": "duplex",
+        "selected_backend": "webrtc_apm",
+        "xrun_events_total": 3
+      }
+    },
+    {
+      "record_type": "audio_session_error",
+      "payload": {
+        "message": "XRUN eskaloval do fallbacku.",
+        "failure_reason": "device_unavailable",
+        "recoverable": true,
+        "recovery_action": "backend_fallback",
+        "recovery_target_state": "recovering",
+        "cooldown_s": 8.0,
+        "source": "duplex",
+        "xrun_events_total": 3
+      }
+    },
+    {
+      "record_type": "audio_session_state",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "webrtc_apm",
+        "fallback_reason": "windows_system_aec_unavailable",
+        "degradation_cause": "",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_webrtc_apm",
+        "product_status": "Notebook builtin + WebRTC APM",
+        "capture_gate_policy": "webrtc_apm",
+        "recovery_policy": "prefer_current_until_failure",
+        "session_state": "recovering",
+        "session_timing": {
+          "started_at_mono": 2813.686131,
+          "activated_at_mono": 2813.686337,
+          "uptime_s": 0.0,
+          "active_for_s": 0.0,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": false,
+          "health": "starting",
+          "available_samples": 0,
+          "callback_age_ms": -1,
+          "ready_events": 0,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "webrtc_apm",
+          "health_score": 0.94,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_webrtc_apm",
+          "product_status": "Notebook builtin + WebRTC APM",
+          "capture_gate_policy": "webrtc_apm",
+          "recovery_policy": "prefer_current_until_failure",
+          "reference_ready": false,
+          "reference_available_samples": 0,
+          "reference_callback_age_ms": -1,
+          "reference_health_state": "starting",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "windows_system_aec_unavailable",
+          "degradation_cause": "",
+          "last_failure_reason": "device_unavailable",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 3,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 0,
+          "backend_switches_total": 1,
+          "xrun_events_total": 3,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 0.94,
+        "last_failure_reason": "device_unavailable",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": true,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "recovering",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "webrtc_apm",
+          "product_mode_key": "notebook_builtin_webrtc_apm",
+          "product_status": "Notebook builtin + WebRTC APM",
+          "capture_gate_policy": "webrtc_apm",
+          "recovery_policy": "prefer_current_until_failure",
+          "fallback_chain_step": 1,
+          "fallback_reason": "windows_system_aec_unavailable",
+          "degradation_cause": "",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 3,
+          "device_resets_total": 0,
+          "reference_health_timeline": [],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.686137,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.686229,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.686249,
+              "category": "backend_probe",
+              "reason": "windows_system_aec_unavailable",
+              "action": "probe_fallback",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "webrtc_apm",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 0.94,
+          "timings": {
+            "session_start_mono": 2813.686131,
+            "session_probe_start_mono": 2813.686228,
+            "session_probe_done_mono": 2813.686247,
+            "session_active_mono": 2813.686337,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.0,
+            "active_for_s": 0.0,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 0,
+            "responses_completed_total": 0,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": false,
+            "reference_health_state": "starting",
+            "reference_available_samples": 0,
+            "reference_callback_age_ms": -1,
+            "reference_ready_events": 0,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "device_unavailable",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "reason": "device_unavailable"
+      }
+    },
+    {
+      "record_type": "audio_backend_fallback",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "degraded_no_aec",
+        "fallback_reason": "device_unavailable",
+        "degradation_cause": "device_unavailable",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_degraded_no_aec",
+        "product_status": "Nouzový režim bez AEC",
+        "capture_gate_policy": "degraded_no_aec",
+        "recovery_policy": "probe_richer_backend_again",
+        "session_state": "recovering",
+        "session_timing": {
+          "started_at_mono": 2813.686131,
+          "activated_at_mono": 2813.686337,
+          "uptime_s": 0.0,
+          "active_for_s": 0.0,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": false,
+          "health": "starting",
+          "available_samples": 0,
+          "callback_age_ms": -1,
+          "ready_events": 0,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "degraded_no_aec",
+          "health_score": 0.74,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_degraded_no_aec",
+          "product_status": "Nouzový režim bez AEC",
+          "capture_gate_policy": "degraded_no_aec",
+          "recovery_policy": "probe_richer_backend_again",
+          "reference_ready": false,
+          "reference_available_samples": 0,
+          "reference_callback_age_ms": -1,
+          "reference_health_state": "starting",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "device_unavailable",
+          "degradation_cause": "device_unavailable",
+          "last_failure_reason": "device_unavailable",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 3,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 1,
+          "backend_switches_total": 2,
+          "xrun_events_total": 3,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 0.74,
+        "last_failure_reason": "device_unavailable",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "recovering",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "degraded_no_aec",
+          "product_mode_key": "notebook_builtin_degraded_no_aec",
+          "product_status": "Nouzový režim bez AEC",
+          "capture_gate_policy": "degraded_no_aec",
+          "recovery_policy": "probe_richer_backend_again",
+          "fallback_chain_step": 2,
+          "fallback_reason": "device_unavailable",
+          "degradation_cause": "device_unavailable",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 3,
+          "device_resets_total": 0,
+          "reference_health_timeline": [],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.686137,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.686229,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.686249,
+              "category": "backend_probe",
+              "reason": "windows_system_aec_unavailable",
+              "action": "probe_fallback",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "webrtc_apm",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 0.74,
+          "timings": {
+            "session_start_mono": 2813.686131,
+            "session_probe_start_mono": 2813.686228,
+            "session_probe_done_mono": 2813.686247,
+            "session_active_mono": 2813.686337,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.0,
+            "active_for_s": 0.0,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 0,
+            "responses_completed_total": 0,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": false,
+            "reference_health_state": "starting",
+            "reference_available_samples": 0,
+            "reference_callback_age_ms": -1,
+            "reference_ready_events": 0,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "device_unavailable",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "reason": "device_unavailable",
+        "from_backend": "webrtc_apm",
+        "to_backend": "degraded_no_aec"
+      }
+    },
+    {
+      "record_type": "audio_session_state",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "degraded_no_aec",
+        "fallback_reason": "device_unavailable",
+        "degradation_cause": "device_unavailable",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_degraded_no_aec",
+        "product_status": "Nouzový režim bez AEC",
+        "capture_gate_policy": "degraded_no_aec",
+        "recovery_policy": "probe_richer_backend_again",
+        "session_state": "recovering",
+        "session_timing": {
+          "started_at_mono": 2813.686131,
+          "activated_at_mono": 2813.686337,
+          "uptime_s": 0.0,
+          "active_for_s": 0.0,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": false,
+          "health": "starting",
+          "available_samples": 0,
+          "callback_age_ms": -1,
+          "ready_events": 0,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "degraded_no_aec",
+          "health_score": 0.74,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_degraded_no_aec",
+          "product_status": "Nouzový režim bez AEC",
+          "capture_gate_policy": "degraded_no_aec",
+          "recovery_policy": "probe_richer_backend_again",
+          "reference_ready": false,
+          "reference_available_samples": 0,
+          "reference_callback_age_ms": -1,
+          "reference_health_state": "starting",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "device_unavailable",
+          "degradation_cause": "device_unavailable",
+          "last_failure_reason": "device_unavailable",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 3,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 1,
+          "backend_switches_total": 2,
+          "xrun_events_total": 3,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 0.74,
+        "last_failure_reason": "device_unavailable",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "recovering",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "degraded_no_aec",
+          "product_mode_key": "notebook_builtin_degraded_no_aec",
+          "product_status": "Nouzový režim bez AEC",
+          "capture_gate_policy": "degraded_no_aec",
+          "recovery_policy": "probe_richer_backend_again",
+          "fallback_chain_step": 2,
+          "fallback_reason": "device_unavailable",
+          "degradation_cause": "device_unavailable",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 3,
+          "device_resets_total": 0,
+          "reference_health_timeline": [],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.686137,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.686229,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.686249,
+              "category": "backend_probe",
+              "reason": "windows_system_aec_unavailable",
+              "action": "probe_fallback",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "webrtc_apm",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 0.74,
+          "timings": {
+            "session_start_mono": 2813.686131,
+            "session_probe_start_mono": 2813.686228,
+            "session_probe_done_mono": 2813.686247,
+            "session_active_mono": 2813.686337,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.001,
+            "active_for_s": 0.0,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.001
+          },
+          "turn_latency": {
+            "turns_total": 0,
+            "responses_completed_total": 0,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": false,
+            "reference_health_state": "starting",
+            "reference_available_samples": 0,
+            "reference_callback_age_ms": -1,
+            "reference_ready_events": 0,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "device_unavailable",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "reason": "device_unavailable"
+      }
+    },
+    {
+      "record_type": "audio_session_state",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "degraded_no_aec",
+        "fallback_reason": "device_unavailable",
+        "degradation_cause": "device_unavailable",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_degraded_no_aec",
+        "product_status": "Nouzový režim bez AEC",
+        "capture_gate_policy": "degraded_no_aec",
+        "recovery_policy": "probe_richer_backend_again",
+        "session_state": "degraded",
+        "session_timing": {
+          "started_at_mono": 2813.686131,
+          "activated_at_mono": 2813.686337,
+          "uptime_s": 0.001,
+          "active_for_s": 0.0,
+          "last_server_activity_age_s": 0.001
+        },
+        "reference": {
+          "ready": false,
+          "health": "starting",
+          "available_samples": 0,
+          "callback_age_ms": -1,
+          "ready_events": 0,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "degraded_no_aec",
+          "health_score": 0.74,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_degraded_no_aec",
+          "product_status": "Nouzový režim bez AEC",
+          "capture_gate_policy": "degraded_no_aec",
+          "recovery_policy": "probe_richer_backend_again",
+          "reference_ready": false,
+          "reference_available_samples": 0,
+          "reference_callback_age_ms": -1,
+          "reference_health_state": "starting",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "device_unavailable",
+          "degradation_cause": "device_unavailable",
+          "last_failure_reason": "device_unavailable",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 3,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 1,
+          "backend_switches_total": 2,
+          "xrun_events_total": 3,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 0.74,
+        "last_failure_reason": "device_unavailable",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "degraded",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "degraded_no_aec",
+          "product_mode_key": "notebook_builtin_degraded_no_aec",
+          "product_status": "Nouzový režim bez AEC",
+          "capture_gate_policy": "degraded_no_aec",
+          "recovery_policy": "probe_richer_backend_again",
+          "fallback_chain_step": 2,
+          "fallback_reason": "device_unavailable",
+          "degradation_cause": "device_unavailable",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 3,
+          "device_resets_total": 0,
+          "reference_health_timeline": [],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.686137,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.686229,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.686249,
+              "category": "backend_probe",
+              "reason": "windows_system_aec_unavailable",
+              "action": "probe_fallback",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "webrtc_apm",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 0.74,
+          "timings": {
+            "session_start_mono": 2813.686131,
+            "session_probe_start_mono": 2813.686228,
+            "session_probe_done_mono": 2813.686247,
+            "session_active_mono": 2813.686337,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.001,
+            "active_for_s": 0.0,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.001
+          },
+          "turn_latency": {
+            "turns_total": 0,
+            "responses_completed_total": 0,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": false,
+            "reference_health_state": "starting",
+            "reference_available_samples": 0,
+            "reference_callback_age_ms": -1,
+            "reference_ready_events": 0,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "device_unavailable",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "reason": "device_unavailable"
+      }
+    },
+    {
+      "record_type": "audio_device_reset",
+      "payload": {
+        "source": "render",
+        "selected_backend": "degraded_no_aec",
+        "device_resets_total": 1,
+        "failure_reason": "device_unavailable"
+      }
+    },
+    {
+      "record_type": "audio_device_reset",
+      "payload": {
+        "source": "render",
+        "selected_backend": "degraded_no_aec",
+        "device_resets_total": 2,
+        "failure_reason": "device_unavailable"
+      }
+    },
+    {
+      "record_type": "audio_session_error",
+      "payload": {
+        "message": "Device reset eskaloval do fallbacku.",
+        "failure_reason": "device_unavailable",
+        "recoverable": true,
+        "recovery_action": "backend_fallback",
+        "recovery_target_state": "recovering",
+        "cooldown_s": 8.0,
+        "source": "render",
+        "device_resets_total": 2
+      }
+    },
+    {
+      "record_type": "audio_backend_fallback_suppressed",
+      "payload": {
+        "reason": "device_unavailable",
+        "selected_backend": "degraded_no_aec",
+        "cooldown_s": 8.0
+      }
+    }
+  ]
+}

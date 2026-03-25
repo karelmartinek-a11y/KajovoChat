@@ -11,7 +11,7 @@ from kajovochat.services.guard_adaptation import GuardAdaptor
 from kajovochat.services.guard_replay import append_guard_replay_metrics
 from kajovochat.services.guard_telemetry import GuardTelemetry
 from kajovochat.services.voice_features import estimate_voice_likelihood_from_pcm16
-from kajovochat.services.audio_service import AdaptiveEchoCanceller, suppress_echo_from_pcm16, _find_best_alignment
+from kajovochat.audio.dsp_helpers import AdaptiveEchoCanceller, suppress_echo_from_pcm16, _find_best_alignment
 from kajovochat.settings import DEFAULT_AUDIO_GUARD_PROFILE
 
 
@@ -362,7 +362,7 @@ def test_windows_native_preferred_keeps_native_when_webrtc_is_only_marginally_be
     mic = np.clip(0.72 * direct + rng.normal(0.0, 0.004, size=chunk_size), -1.0, 1.0)
 
     canceller = AdaptiveEchoCanceller(samplerate=samplerate, filter_length=1024, max_shift_samples=1400)
-    canceller._windows_native_probe = SimpleNamespace(available=True)
+    canceller._windows_native_probe = SimpleNamespace(available=True, installed_driver=True)
     canceller._ridge_candidate = lambda design, target, ridge=None: (
         np.zeros((design.shape[1],), dtype=np.float32),
         np.zeros((target.shape[0],), dtype=np.float32),
@@ -400,7 +400,7 @@ def test_windows_native_preferred_keeps_native_when_webrtc_is_only_marginally_be
 
     assert result["native_attempted"] is True
     assert result["native_selected"] is True
-    assert result["backend"] == "windows_native"
+    assert result["backend"] == "windows_system_aec"
 
 
 def test_production_webrtc_mode_falls_back_to_degraded_instead_of_custom_output() -> None:
@@ -450,7 +450,7 @@ def test_windows_system_aec_with_installed_apo_uses_system_capture_path() -> Non
         aec_mode="windows_system_aec",
     )
 
-    assert result["backend"] == "windows_system_capture"
+    assert result["backend"] == "windows_system_aec"
     assert result["native_attempted"] is True
     assert result["native_selected"] is True
-    assert result["selection_reason"] == "windows_system_capture"
+    assert result["selection_reason"] == "windows_system_aec"
