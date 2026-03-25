@@ -101,6 +101,7 @@ def build_conversation_audio_stack(
         backend_aware_aec_metrics=backend_aware_aec_metrics,
         state_speaking=state_speaking,
         echo_trailing_hold_s=echo_trailing_hold_s,
+        on_fatal=lambda exc, stage: session_manager.handle_runtime_fatal(exc, stage=stage),
     )
     return ConversationAudioBootstrap(
         runtime_controller=runtime_controller,

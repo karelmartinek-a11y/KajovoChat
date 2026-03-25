@@ -246,6 +246,7 @@ class AudioTelemetry:
     turn_committed_at: float = 0.0
     response_started_at: float = 0.0
     response_first_audio_at: float = 0.0
+    current_turn_input_audio_bytes: int = 0
     turns_total: int = 0
     responses_completed_total: int = 0
     response_first_audio_latency_total_ms: int = 0
@@ -349,8 +350,12 @@ class AudioTelemetry:
         self.response_started_at = 0.0
         self.response_first_audio_at = 0.0
 
+    def reset_turn_input_audio(self) -> None:
+        self.current_turn_input_audio_bytes = 0
+
     def reset_turn_timing(self) -> None:
         self.clear_current_turn()
+        self.reset_turn_input_audio()
         self.turns_total = 0
         self.responses_completed_total = 0
         self.response_first_audio_latency_total_ms = 0
@@ -360,6 +365,12 @@ class AudioTelemetry:
 
     def note_server_activity(self) -> None:
         self.last_server_activity_at = time.monotonic()
+
+    def note_input_audio_appended(self, pcm_bytes: int) -> None:
+        self.current_turn_input_audio_bytes += max(0, int(pcm_bytes))
+
+    def current_turn_input_audio_ms(self) -> float:
+        return float(self.current_turn_input_audio_bytes) / 48.0
 
     def note_transport_activity(self) -> None:
         self.note_server_activity()
@@ -542,6 +553,7 @@ class AudioTelemetry:
         self.turn_committed_at = time.monotonic()
         self.response_started_at = 0.0
         self.response_first_audio_at = 0.0
+        self.current_turn_input_audio_bytes = 0
 
     def note_response_started(self) -> None:
         if self.response_started_at <= 0.0:

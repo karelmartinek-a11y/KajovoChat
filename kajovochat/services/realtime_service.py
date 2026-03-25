@@ -71,6 +71,7 @@ class RealtimeService:
         self.on_vad_speech_started: Optional[Callable[[], None]] = None
         self.on_vad_speech_stopped: Optional[Callable[[], None]] = None
         self.on_response_done: Optional[Callable[[], None]] = None
+        self.on_event: Optional[Callable[[dict], None]] = None
 
         self._assistant_text_buf = ""
         self.last_event_ts = time.monotonic()
@@ -306,11 +307,11 @@ class RealtimeService:
 
     # ---- Audio input ----
 
-    def append_audio_pcm16(self, pcm16_bytes: bytes) -> None:
+    def append_audio_pcm16(self, pcm16_bytes: bytes) -> bool:
         if not pcm16_bytes:
-            return
+            return False
         b64 = base64.b64encode(pcm16_bytes).decode("ascii")
-        self._send({"type": "input_audio_buffer.append", "audio": b64})
+        return self._send({"type": "input_audio_buffer.append", "audio": b64})
 
     def clear_input_audio(self) -> None:
         self._send({"type": "input_audio_buffer.clear"})
@@ -342,6 +343,11 @@ class RealtimeService:
         if not etype:
             return
         self.last_event_ts = time.monotonic()
+        if self.on_event:
+            try:
+                self.on_event(evt)
+            except Exception:
+                pass
 
         if etype == "error":
             msg = evt.get("error", {}).get("message") or json.dumps(evt, ensure_ascii=False)

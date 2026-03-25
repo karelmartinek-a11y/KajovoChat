@@ -69,3 +69,16 @@ def test_duplex_audio_session_exposes_unified_runtime_state() -> None:
     assert state["rendered_samples"] == 120
     assert state["captured_samples"] == 96
     assert state["reference_available_samples"] >= 0
+
+
+def test_duplex_audio_session_caps_playback_backlog() -> None:
+    duplex = DuplexAudioSession(samplerate=24000, input_device=None, output_device=None, blocksize=480)
+    duplex._stream = object()
+
+    chunk = b"\x01\x00" * 60000
+    duplex.enqueue_pcm16(chunk)
+    duplex.enqueue_pcm16(chunk)
+
+    assert duplex.buffered_bytes == duplex._max_playback_buffer_bytes
+    stats = duplex.get_echo_reference_stats()
+    assert stats["total_samples"] <= duplex._echo_reference_played_samples + (duplex._max_playback_buffer_bytes // 2)

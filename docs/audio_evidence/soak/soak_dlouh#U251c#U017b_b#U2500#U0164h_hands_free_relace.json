@@ -1,0 +1,3076 @@
+{
+  "scenario": "soak: dlouhý běh hands-free relace",
+  "verification": "24 syntetických turnů v jedné relaci",
+  "expected_final_state": "active",
+  "backend_chain": [
+    "windows_system_aec",
+    "webrtc_apm",
+    "degraded_no_aec"
+  ],
+  "pass_fail": "PASS",
+  "requested_backend": "windows_system_aec",
+  "selected_backend": "windows_system_aec",
+  "session_state": "active",
+  "telemetry_snapshot": {
+    "session_state": "active",
+    "requested_backend": "windows_system_aec",
+    "selected_backend": "windows_system_aec",
+    "product_mode_key": "notebook_builtin_windows_system_aec",
+    "product_status": "Notebook builtin + Windows System AEC",
+    "capture_gate_policy": "windows_system_aec",
+    "recovery_policy": "prefer_current_until_failure",
+    "fallback_chain_step": 0,
+    "fallback_reason": "",
+    "degradation_cause": "",
+    "reconnect_attempts": 0,
+    "recovery_attempts_total": 0,
+    "recovery_successes_total": 0,
+    "recovery_failures_total": 0,
+    "xrun_events_total": 0,
+    "device_resets_total": 0,
+    "reference_health_timeline": [
+      {
+        "mono_ts": 2813.665224,
+        "ready": true,
+        "available_samples": 2400,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.665644,
+        "ready": true,
+        "available_samples": 2401,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.666057,
+        "ready": true,
+        "available_samples": 2402,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.666437,
+        "ready": true,
+        "available_samples": 2403,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.666813,
+        "ready": true,
+        "available_samples": 2404,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.667197,
+        "ready": true,
+        "available_samples": 2405,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.667584,
+        "ready": true,
+        "available_samples": 2406,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.668384,
+        "ready": true,
+        "available_samples": 2407,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.668856,
+        "ready": true,
+        "available_samples": 2408,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.669284,
+        "ready": true,
+        "available_samples": 2409,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.66974,
+        "ready": true,
+        "available_samples": 2410,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.670166,
+        "ready": true,
+        "available_samples": 2411,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.670613,
+        "ready": true,
+        "available_samples": 2412,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.671087,
+        "ready": true,
+        "available_samples": 2413,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.671778,
+        "ready": true,
+        "available_samples": 2414,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.672424,
+        "ready": true,
+        "available_samples": 2415,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.672921,
+        "ready": true,
+        "available_samples": 2416,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.673393,
+        "ready": true,
+        "available_samples": 2417,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.674415,
+        "ready": true,
+        "available_samples": 2418,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.674936,
+        "ready": true,
+        "available_samples": 2419,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.675405,
+        "ready": true,
+        "available_samples": 2420,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.675876,
+        "ready": true,
+        "available_samples": 2421,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.676604,
+        "ready": true,
+        "available_samples": 2422,
+        "callback_age_ms": 8,
+        "state": "ready"
+      },
+      {
+        "mono_ts": 2813.67741,
+        "ready": true,
+        "available_samples": 2423,
+        "callback_age_ms": 8,
+        "state": "ready"
+      }
+    ],
+    "recovery_story": [
+      {
+        "mono_ts": 2813.664932,
+        "category": "session",
+        "reason": "session_started",
+        "action": "start",
+        "session_state": "starting",
+        "selected_backend": "windows_system_aec",
+        "target_backend": "windows_system_aec",
+        "cooldown_s": 0.0
+      },
+      {
+        "mono_ts": 2813.665031,
+        "category": "session",
+        "reason": "backend_probe_started",
+        "action": "probe",
+        "session_state": "probing",
+        "selected_backend": "windows_system_aec",
+        "target_backend": "",
+        "cooldown_s": 0.0
+      },
+      {
+        "mono_ts": 2813.665049,
+        "category": "backend_probe",
+        "reason": "backend_probe",
+        "action": "probe_selected",
+        "session_state": "probing",
+        "selected_backend": "windows_system_aec",
+        "target_backend": "windows_system_aec",
+        "cooldown_s": 0.0,
+        "detail": {
+          "degraded": false
+        }
+      }
+    ],
+    "backend_health_score": 1.0,
+    "timings": {
+      "session_start_mono": 2813.664926,
+      "session_probe_start_mono": 2813.66503,
+      "session_probe_done_mono": 2813.665047,
+      "session_active_mono": 2813.665133,
+      "session_stop_mono": 0.0,
+      "uptime_s": 0.013,
+      "active_for_s": 0.013,
+      "probe_duration_s": 0.0,
+      "last_server_activity_age_s": 0.0
+    },
+    "turn_latency": {
+      "turns_total": 24,
+      "responses_completed_total": 24,
+      "avg_first_audio_latency_ms": 0.0,
+      "max_first_audio_latency_ms": 0,
+      "avg_response_latency_ms": 0.0,
+      "max_response_latency_ms": 0
+    },
+    "health": {
+      "reference_ready": true,
+      "reference_health_state": "ready",
+      "reference_available_samples": 2423,
+      "reference_callback_age_ms": 8,
+      "reference_ready_events": 24,
+      "reference_miss_events": 0,
+      "reference_consecutive_misses": 0,
+      "poor_aec_events": 0,
+      "poor_aec_consecutive": 0,
+      "last_failure_reason": "",
+      "pending_events": 0,
+      "pending_mic_chunks": 0,
+      "pending_player_bytes": 0
+    }
+  },
+  "session_state_story": [
+    "starting",
+    "probing",
+    "active"
+  ],
+  "recovery_actions": [
+    "start",
+    "probe",
+    "probe_selected"
+  ],
+  "captions": [
+    "Hands-free: Realtime aktivní (server VAD)."
+  ],
+  "log_excerpt": [
+    {
+      "record_type": "audio_ui_state",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "windows_system_aec",
+        "fallback_reason": "",
+        "degradation_cause": "",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_windows_system_aec",
+        "product_status": "Notebook builtin + Windows System AEC",
+        "capture_gate_policy": "windows_system_aec",
+        "recovery_policy": "prefer_current_until_failure",
+        "session_state": "active",
+        "session_timing": {
+          "started_at_mono": 2813.664926,
+          "activated_at_mono": 2813.665133,
+          "uptime_s": 0.012,
+          "active_for_s": 0.012,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": true,
+          "health": "ready",
+          "available_samples": 2422,
+          "callback_age_ms": 8,
+          "ready_events": 23,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "windows_system_aec",
+          "health_score": 1.0,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "reference_ready": true,
+          "reference_available_samples": 2422,
+          "reference_callback_age_ms": 8,
+          "reference_health_state": "ready",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "last_failure_reason": "",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 0,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 0,
+          "backend_switches_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 1.0,
+        "last_failure_reason": "",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "active",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "windows_system_aec",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "fallback_chain_step": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "reference_health_timeline": [
+            {
+              "mono_ts": 2813.665224,
+              "ready": true,
+              "available_samples": 2400,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.665644,
+              "ready": true,
+              "available_samples": 2401,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666057,
+              "ready": true,
+              "available_samples": 2402,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666437,
+              "ready": true,
+              "available_samples": 2403,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666813,
+              "ready": true,
+              "available_samples": 2404,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667197,
+              "ready": true,
+              "available_samples": 2405,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667584,
+              "ready": true,
+              "available_samples": 2406,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668384,
+              "ready": true,
+              "available_samples": 2407,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668856,
+              "ready": true,
+              "available_samples": 2408,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.669284,
+              "ready": true,
+              "available_samples": 2409,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.66974,
+              "ready": true,
+              "available_samples": 2410,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670166,
+              "ready": true,
+              "available_samples": 2411,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670613,
+              "ready": true,
+              "available_samples": 2412,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671087,
+              "ready": true,
+              "available_samples": 2413,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671778,
+              "ready": true,
+              "available_samples": 2414,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672424,
+              "ready": true,
+              "available_samples": 2415,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672921,
+              "ready": true,
+              "available_samples": 2416,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.673393,
+              "ready": true,
+              "available_samples": 2417,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674415,
+              "ready": true,
+              "available_samples": 2418,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674936,
+              "ready": true,
+              "available_samples": 2419,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675405,
+              "ready": true,
+              "available_samples": 2420,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675876,
+              "ready": true,
+              "available_samples": 2421,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.676604,
+              "ready": true,
+              "available_samples": 2422,
+              "callback_age_ms": 8,
+              "state": "ready"
+            }
+          ],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.664932,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665031,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665049,
+              "category": "backend_probe",
+              "reason": "backend_probe",
+              "action": "probe_selected",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 1.0,
+          "timings": {
+            "session_start_mono": 2813.664926,
+            "session_probe_start_mono": 2813.66503,
+            "session_probe_done_mono": 2813.665047,
+            "session_active_mono": 2813.665133,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.012,
+            "active_for_s": 0.012,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 23,
+            "responses_completed_total": 22,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": true,
+            "reference_health_state": "ready",
+            "reference_available_samples": 2422,
+            "reference_callback_age_ms": 8,
+            "reference_ready_events": 23,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "reason": "assistant_audio",
+        "ui_state": "speaking"
+      }
+    },
+    {
+      "record_type": "assistant_audio_first_delta",
+      "payload": {
+        "latency_ms": 0,
+        "bytes": 480
+      }
+    },
+    {
+      "record_type": "response_done",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "windows_system_aec",
+        "fallback_reason": "",
+        "degradation_cause": "",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_windows_system_aec",
+        "product_status": "Notebook builtin + Windows System AEC",
+        "capture_gate_policy": "windows_system_aec",
+        "recovery_policy": "prefer_current_until_failure",
+        "session_state": "active",
+        "session_timing": {
+          "started_at_mono": 2813.664926,
+          "activated_at_mono": 2813.665133,
+          "uptime_s": 0.012,
+          "active_for_s": 0.012,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": true,
+          "health": "ready",
+          "available_samples": 2422,
+          "callback_age_ms": 8,
+          "ready_events": 23,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "windows_system_aec",
+          "health_score": 1.0,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "reference_ready": true,
+          "reference_available_samples": 2422,
+          "reference_callback_age_ms": 8,
+          "reference_health_state": "ready",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "last_failure_reason": "",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 0,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 0,
+          "backend_switches_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 1.0,
+        "last_failure_reason": "",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "active",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "windows_system_aec",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "fallback_chain_step": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "reference_health_timeline": [
+            {
+              "mono_ts": 2813.665224,
+              "ready": true,
+              "available_samples": 2400,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.665644,
+              "ready": true,
+              "available_samples": 2401,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666057,
+              "ready": true,
+              "available_samples": 2402,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666437,
+              "ready": true,
+              "available_samples": 2403,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666813,
+              "ready": true,
+              "available_samples": 2404,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667197,
+              "ready": true,
+              "available_samples": 2405,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667584,
+              "ready": true,
+              "available_samples": 2406,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668384,
+              "ready": true,
+              "available_samples": 2407,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668856,
+              "ready": true,
+              "available_samples": 2408,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.669284,
+              "ready": true,
+              "available_samples": 2409,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.66974,
+              "ready": true,
+              "available_samples": 2410,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670166,
+              "ready": true,
+              "available_samples": 2411,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670613,
+              "ready": true,
+              "available_samples": 2412,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671087,
+              "ready": true,
+              "available_samples": 2413,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671778,
+              "ready": true,
+              "available_samples": 2414,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672424,
+              "ready": true,
+              "available_samples": 2415,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672921,
+              "ready": true,
+              "available_samples": 2416,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.673393,
+              "ready": true,
+              "available_samples": 2417,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674415,
+              "ready": true,
+              "available_samples": 2418,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674936,
+              "ready": true,
+              "available_samples": 2419,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675405,
+              "ready": true,
+              "available_samples": 2420,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675876,
+              "ready": true,
+              "available_samples": 2421,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.676604,
+              "ready": true,
+              "available_samples": 2422,
+              "callback_age_ms": 8,
+              "state": "ready"
+            }
+          ],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.664932,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665031,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665049,
+              "category": "backend_probe",
+              "reason": "backend_probe",
+              "action": "probe_selected",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 1.0,
+          "timings": {
+            "session_start_mono": 2813.664926,
+            "session_probe_start_mono": 2813.66503,
+            "session_probe_done_mono": 2813.665047,
+            "session_active_mono": 2813.665133,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.012,
+            "active_for_s": 0.012,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 23,
+            "responses_completed_total": 23,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": true,
+            "reference_health_state": "ready",
+            "reference_available_samples": 2422,
+            "reference_callback_age_ms": 8,
+            "reference_ready_events": 23,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "total_latency_ms": 0
+      }
+    },
+    {
+      "record_type": "audio_ui_state",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "windows_system_aec",
+        "fallback_reason": "",
+        "degradation_cause": "",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_windows_system_aec",
+        "product_status": "Notebook builtin + Windows System AEC",
+        "capture_gate_policy": "windows_system_aec",
+        "recovery_policy": "prefer_current_until_failure",
+        "session_state": "active",
+        "session_timing": {
+          "started_at_mono": 2813.664926,
+          "activated_at_mono": 2813.665133,
+          "uptime_s": 0.012,
+          "active_for_s": 0.012,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": true,
+          "health": "ready",
+          "available_samples": 2422,
+          "callback_age_ms": 8,
+          "ready_events": 23,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "windows_system_aec",
+          "health_score": 1.0,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "reference_ready": true,
+          "reference_available_samples": 2422,
+          "reference_callback_age_ms": 8,
+          "reference_health_state": "ready",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "last_failure_reason": "",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 0,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 0,
+          "backend_switches_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 1.0,
+        "last_failure_reason": "",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "active",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "windows_system_aec",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "fallback_chain_step": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "reference_health_timeline": [
+            {
+              "mono_ts": 2813.665224,
+              "ready": true,
+              "available_samples": 2400,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.665644,
+              "ready": true,
+              "available_samples": 2401,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666057,
+              "ready": true,
+              "available_samples": 2402,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666437,
+              "ready": true,
+              "available_samples": 2403,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666813,
+              "ready": true,
+              "available_samples": 2404,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667197,
+              "ready": true,
+              "available_samples": 2405,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667584,
+              "ready": true,
+              "available_samples": 2406,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668384,
+              "ready": true,
+              "available_samples": 2407,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668856,
+              "ready": true,
+              "available_samples": 2408,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.669284,
+              "ready": true,
+              "available_samples": 2409,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.66974,
+              "ready": true,
+              "available_samples": 2410,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670166,
+              "ready": true,
+              "available_samples": 2411,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670613,
+              "ready": true,
+              "available_samples": 2412,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671087,
+              "ready": true,
+              "available_samples": 2413,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671778,
+              "ready": true,
+              "available_samples": 2414,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672424,
+              "ready": true,
+              "available_samples": 2415,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672921,
+              "ready": true,
+              "available_samples": 2416,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.673393,
+              "ready": true,
+              "available_samples": 2417,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674415,
+              "ready": true,
+              "available_samples": 2418,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674936,
+              "ready": true,
+              "available_samples": 2419,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675405,
+              "ready": true,
+              "available_samples": 2420,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675876,
+              "ready": true,
+              "available_samples": 2421,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.676604,
+              "ready": true,
+              "available_samples": 2422,
+              "callback_age_ms": 8,
+              "state": "ready"
+            }
+          ],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.664932,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665031,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665049,
+              "category": "backend_probe",
+              "reason": "backend_probe",
+              "action": "probe_selected",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 1.0,
+          "timings": {
+            "session_start_mono": 2813.664926,
+            "session_probe_start_mono": 2813.66503,
+            "session_probe_done_mono": 2813.665047,
+            "session_active_mono": 2813.665133,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.012,
+            "active_for_s": 0.012,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 23,
+            "responses_completed_total": 23,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": true,
+            "reference_health_state": "ready",
+            "reference_available_samples": 2422,
+            "reference_callback_age_ms": 8,
+            "reference_ready_events": 23,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "reason": "response_done",
+        "ui_state": "listening"
+      }
+    },
+    {
+      "record_type": "audio_ui_state",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "windows_system_aec",
+        "fallback_reason": "",
+        "degradation_cause": "",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_windows_system_aec",
+        "product_status": "Notebook builtin + Windows System AEC",
+        "capture_gate_policy": "windows_system_aec",
+        "recovery_policy": "prefer_current_until_failure",
+        "session_state": "active",
+        "session_timing": {
+          "started_at_mono": 2813.664926,
+          "activated_at_mono": 2813.665133,
+          "uptime_s": 0.012,
+          "active_for_s": 0.012,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": true,
+          "health": "ready",
+          "available_samples": 2423,
+          "callback_age_ms": 8,
+          "ready_events": 24,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "windows_system_aec",
+          "health_score": 1.0,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "reference_ready": true,
+          "reference_available_samples": 2423,
+          "reference_callback_age_ms": 8,
+          "reference_health_state": "ready",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "last_failure_reason": "",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 0,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 0,
+          "backend_switches_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 1.0,
+        "last_failure_reason": "",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "active",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "windows_system_aec",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "fallback_chain_step": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "reference_health_timeline": [
+            {
+              "mono_ts": 2813.665224,
+              "ready": true,
+              "available_samples": 2400,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.665644,
+              "ready": true,
+              "available_samples": 2401,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666057,
+              "ready": true,
+              "available_samples": 2402,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666437,
+              "ready": true,
+              "available_samples": 2403,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666813,
+              "ready": true,
+              "available_samples": 2404,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667197,
+              "ready": true,
+              "available_samples": 2405,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667584,
+              "ready": true,
+              "available_samples": 2406,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668384,
+              "ready": true,
+              "available_samples": 2407,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668856,
+              "ready": true,
+              "available_samples": 2408,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.669284,
+              "ready": true,
+              "available_samples": 2409,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.66974,
+              "ready": true,
+              "available_samples": 2410,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670166,
+              "ready": true,
+              "available_samples": 2411,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670613,
+              "ready": true,
+              "available_samples": 2412,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671087,
+              "ready": true,
+              "available_samples": 2413,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671778,
+              "ready": true,
+              "available_samples": 2414,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672424,
+              "ready": true,
+              "available_samples": 2415,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672921,
+              "ready": true,
+              "available_samples": 2416,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.673393,
+              "ready": true,
+              "available_samples": 2417,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674415,
+              "ready": true,
+              "available_samples": 2418,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674936,
+              "ready": true,
+              "available_samples": 2419,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675405,
+              "ready": true,
+              "available_samples": 2420,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675876,
+              "ready": true,
+              "available_samples": 2421,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.676604,
+              "ready": true,
+              "available_samples": 2422,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.67741,
+              "ready": true,
+              "available_samples": 2423,
+              "callback_age_ms": 8,
+              "state": "ready"
+            }
+          ],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.664932,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665031,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665049,
+              "category": "backend_probe",
+              "reason": "backend_probe",
+              "action": "probe_selected",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 1.0,
+          "timings": {
+            "session_start_mono": 2813.664926,
+            "session_probe_start_mono": 2813.66503,
+            "session_probe_done_mono": 2813.665047,
+            "session_active_mono": 2813.665133,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.013,
+            "active_for_s": 0.012,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 23,
+            "responses_completed_total": 23,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": true,
+            "reference_health_state": "ready",
+            "reference_available_samples": 2423,
+            "reference_callback_age_ms": 8,
+            "reference_ready_events": 24,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "reason": "barge_in",
+        "ui_state": "transcribing"
+      }
+    },
+    {
+      "record_type": "speech_stopped",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "windows_system_aec",
+        "fallback_reason": "",
+        "degradation_cause": "",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_windows_system_aec",
+        "product_status": "Notebook builtin + Windows System AEC",
+        "capture_gate_policy": "windows_system_aec",
+        "recovery_policy": "prefer_current_until_failure",
+        "session_state": "active",
+        "session_timing": {
+          "started_at_mono": 2813.664926,
+          "activated_at_mono": 2813.665133,
+          "uptime_s": 0.013,
+          "active_for_s": 0.012,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": true,
+          "health": "ready",
+          "available_samples": 2423,
+          "callback_age_ms": 8,
+          "ready_events": 24,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "windows_system_aec",
+          "health_score": 1.0,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "reference_ready": true,
+          "reference_available_samples": 2423,
+          "reference_callback_age_ms": 8,
+          "reference_health_state": "ready",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "last_failure_reason": "",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 0,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 0,
+          "backend_switches_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 1.0,
+        "last_failure_reason": "",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "active",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "windows_system_aec",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "fallback_chain_step": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "reference_health_timeline": [
+            {
+              "mono_ts": 2813.665224,
+              "ready": true,
+              "available_samples": 2400,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.665644,
+              "ready": true,
+              "available_samples": 2401,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666057,
+              "ready": true,
+              "available_samples": 2402,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666437,
+              "ready": true,
+              "available_samples": 2403,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666813,
+              "ready": true,
+              "available_samples": 2404,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667197,
+              "ready": true,
+              "available_samples": 2405,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667584,
+              "ready": true,
+              "available_samples": 2406,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668384,
+              "ready": true,
+              "available_samples": 2407,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668856,
+              "ready": true,
+              "available_samples": 2408,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.669284,
+              "ready": true,
+              "available_samples": 2409,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.66974,
+              "ready": true,
+              "available_samples": 2410,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670166,
+              "ready": true,
+              "available_samples": 2411,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670613,
+              "ready": true,
+              "available_samples": 2412,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671087,
+              "ready": true,
+              "available_samples": 2413,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671778,
+              "ready": true,
+              "available_samples": 2414,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672424,
+              "ready": true,
+              "available_samples": 2415,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672921,
+              "ready": true,
+              "available_samples": 2416,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.673393,
+              "ready": true,
+              "available_samples": 2417,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674415,
+              "ready": true,
+              "available_samples": 2418,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674936,
+              "ready": true,
+              "available_samples": 2419,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675405,
+              "ready": true,
+              "available_samples": 2420,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675876,
+              "ready": true,
+              "available_samples": 2421,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.676604,
+              "ready": true,
+              "available_samples": 2422,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.67741,
+              "ready": true,
+              "available_samples": 2423,
+              "callback_age_ms": 8,
+              "state": "ready"
+            }
+          ],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.664932,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665031,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665049,
+              "category": "backend_probe",
+              "reason": "backend_probe",
+              "action": "probe_selected",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 1.0,
+          "timings": {
+            "session_start_mono": 2813.664926,
+            "session_probe_start_mono": 2813.66503,
+            "session_probe_done_mono": 2813.665047,
+            "session_active_mono": 2813.665133,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.013,
+            "active_for_s": 0.013,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 24,
+            "responses_completed_total": 23,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": true,
+            "reference_health_state": "ready",
+            "reference_available_samples": 2423,
+            "reference_callback_age_ms": 8,
+            "reference_ready_events": 24,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        }
+      }
+    },
+    {
+      "record_type": "audio_ui_state",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "windows_system_aec",
+        "fallback_reason": "",
+        "degradation_cause": "",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_windows_system_aec",
+        "product_status": "Notebook builtin + Windows System AEC",
+        "capture_gate_policy": "windows_system_aec",
+        "recovery_policy": "prefer_current_until_failure",
+        "session_state": "active",
+        "session_timing": {
+          "started_at_mono": 2813.664926,
+          "activated_at_mono": 2813.665133,
+          "uptime_s": 0.013,
+          "active_for_s": 0.013,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": true,
+          "health": "ready",
+          "available_samples": 2423,
+          "callback_age_ms": 8,
+          "ready_events": 24,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "windows_system_aec",
+          "health_score": 1.0,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "reference_ready": true,
+          "reference_available_samples": 2423,
+          "reference_callback_age_ms": 8,
+          "reference_health_state": "ready",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "last_failure_reason": "",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 0,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 0,
+          "backend_switches_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 1.0,
+        "last_failure_reason": "",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "active",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "windows_system_aec",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "fallback_chain_step": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "reference_health_timeline": [
+            {
+              "mono_ts": 2813.665224,
+              "ready": true,
+              "available_samples": 2400,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.665644,
+              "ready": true,
+              "available_samples": 2401,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666057,
+              "ready": true,
+              "available_samples": 2402,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666437,
+              "ready": true,
+              "available_samples": 2403,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666813,
+              "ready": true,
+              "available_samples": 2404,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667197,
+              "ready": true,
+              "available_samples": 2405,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667584,
+              "ready": true,
+              "available_samples": 2406,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668384,
+              "ready": true,
+              "available_samples": 2407,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668856,
+              "ready": true,
+              "available_samples": 2408,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.669284,
+              "ready": true,
+              "available_samples": 2409,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.66974,
+              "ready": true,
+              "available_samples": 2410,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670166,
+              "ready": true,
+              "available_samples": 2411,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670613,
+              "ready": true,
+              "available_samples": 2412,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671087,
+              "ready": true,
+              "available_samples": 2413,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671778,
+              "ready": true,
+              "available_samples": 2414,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672424,
+              "ready": true,
+              "available_samples": 2415,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672921,
+              "ready": true,
+              "available_samples": 2416,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.673393,
+              "ready": true,
+              "available_samples": 2417,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674415,
+              "ready": true,
+              "available_samples": 2418,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674936,
+              "ready": true,
+              "available_samples": 2419,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675405,
+              "ready": true,
+              "available_samples": 2420,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675876,
+              "ready": true,
+              "available_samples": 2421,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.676604,
+              "ready": true,
+              "available_samples": 2422,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.67741,
+              "ready": true,
+              "available_samples": 2423,
+              "callback_age_ms": 8,
+              "state": "ready"
+            }
+          ],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.664932,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665031,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665049,
+              "category": "backend_probe",
+              "reason": "backend_probe",
+              "action": "probe_selected",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 1.0,
+          "timings": {
+            "session_start_mono": 2813.664926,
+            "session_probe_start_mono": 2813.66503,
+            "session_probe_done_mono": 2813.665047,
+            "session_active_mono": 2813.665133,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.013,
+            "active_for_s": 0.013,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 24,
+            "responses_completed_total": 23,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": true,
+            "reference_health_state": "ready",
+            "reference_available_samples": 2423,
+            "reference_callback_age_ms": 8,
+            "reference_ready_events": 24,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "reason": "assistant_audio",
+        "ui_state": "speaking"
+      }
+    },
+    {
+      "record_type": "assistant_audio_first_delta",
+      "payload": {
+        "latency_ms": 0,
+        "bytes": 480
+      }
+    },
+    {
+      "record_type": "response_done",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "windows_system_aec",
+        "fallback_reason": "",
+        "degradation_cause": "",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_windows_system_aec",
+        "product_status": "Notebook builtin + Windows System AEC",
+        "capture_gate_policy": "windows_system_aec",
+        "recovery_policy": "prefer_current_until_failure",
+        "session_state": "active",
+        "session_timing": {
+          "started_at_mono": 2813.664926,
+          "activated_at_mono": 2813.665133,
+          "uptime_s": 0.013,
+          "active_for_s": 0.013,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": true,
+          "health": "ready",
+          "available_samples": 2423,
+          "callback_age_ms": 8,
+          "ready_events": 24,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "windows_system_aec",
+          "health_score": 1.0,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "reference_ready": true,
+          "reference_available_samples": 2423,
+          "reference_callback_age_ms": 8,
+          "reference_health_state": "ready",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "last_failure_reason": "",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 0,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 0,
+          "backend_switches_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 1.0,
+        "last_failure_reason": "",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "active",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "windows_system_aec",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "fallback_chain_step": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "reference_health_timeline": [
+            {
+              "mono_ts": 2813.665224,
+              "ready": true,
+              "available_samples": 2400,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.665644,
+              "ready": true,
+              "available_samples": 2401,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666057,
+              "ready": true,
+              "available_samples": 2402,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666437,
+              "ready": true,
+              "available_samples": 2403,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666813,
+              "ready": true,
+              "available_samples": 2404,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667197,
+              "ready": true,
+              "available_samples": 2405,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667584,
+              "ready": true,
+              "available_samples": 2406,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668384,
+              "ready": true,
+              "available_samples": 2407,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668856,
+              "ready": true,
+              "available_samples": 2408,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.669284,
+              "ready": true,
+              "available_samples": 2409,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.66974,
+              "ready": true,
+              "available_samples": 2410,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670166,
+              "ready": true,
+              "available_samples": 2411,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670613,
+              "ready": true,
+              "available_samples": 2412,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671087,
+              "ready": true,
+              "available_samples": 2413,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671778,
+              "ready": true,
+              "available_samples": 2414,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672424,
+              "ready": true,
+              "available_samples": 2415,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672921,
+              "ready": true,
+              "available_samples": 2416,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.673393,
+              "ready": true,
+              "available_samples": 2417,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674415,
+              "ready": true,
+              "available_samples": 2418,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674936,
+              "ready": true,
+              "available_samples": 2419,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675405,
+              "ready": true,
+              "available_samples": 2420,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675876,
+              "ready": true,
+              "available_samples": 2421,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.676604,
+              "ready": true,
+              "available_samples": 2422,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.67741,
+              "ready": true,
+              "available_samples": 2423,
+              "callback_age_ms": 8,
+              "state": "ready"
+            }
+          ],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.664932,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665031,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665049,
+              "category": "backend_probe",
+              "reason": "backend_probe",
+              "action": "probe_selected",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 1.0,
+          "timings": {
+            "session_start_mono": 2813.664926,
+            "session_probe_start_mono": 2813.66503,
+            "session_probe_done_mono": 2813.665047,
+            "session_active_mono": 2813.665133,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.013,
+            "active_for_s": 0.013,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 24,
+            "responses_completed_total": 24,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": true,
+            "reference_health_state": "ready",
+            "reference_available_samples": 2423,
+            "reference_callback_age_ms": 8,
+            "reference_ready_events": 24,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "total_latency_ms": 0
+      }
+    },
+    {
+      "record_type": "audio_ui_state",
+      "payload": {
+        "requested_backend": "windows_system_aec",
+        "selected_backend": "windows_system_aec",
+        "fallback_reason": "",
+        "degradation_cause": "",
+        "device_fingerprint": "fp-notebook_builtin-1",
+        "audio_mode": "notebook_builtin",
+        "product_mode_key": "notebook_builtin_windows_system_aec",
+        "product_status": "Notebook builtin + Windows System AEC",
+        "capture_gate_policy": "windows_system_aec",
+        "recovery_policy": "prefer_current_until_failure",
+        "session_state": "active",
+        "session_timing": {
+          "started_at_mono": 2813.664926,
+          "activated_at_mono": 2813.665133,
+          "uptime_s": 0.013,
+          "active_for_s": 0.013,
+          "last_server_activity_age_s": 0.0
+        },
+        "reference": {
+          "ready": true,
+          "health": "ready",
+          "available_samples": 2423,
+          "callback_age_ms": 8,
+          "ready_events": 24,
+          "miss_events": 0,
+          "consecutive_misses": 0
+        },
+        "aec_health": {
+          "poor_events": 0,
+          "poor_consecutive": 0
+        },
+        "backend_health": {
+          "backend": "windows_system_aec",
+          "health_score": 1.0,
+          "requested_backend": "windows_system_aec",
+          "audio_mode": "notebook_builtin",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "reference_ready": true,
+          "reference_available_samples": 2423,
+          "reference_callback_age_ms": 8,
+          "reference_health_state": "ready",
+          "poor_aec_events": 0,
+          "poor_aec_consecutive": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "last_failure_reason": "",
+          "reference_loss_ratio": 0.0,
+          "aec_effective_ratio": 0.0,
+          "double_talk_ratio": 0.0,
+          "barge_in_success_ratio": 0.0,
+          "recoveries": 0,
+          "xruns": 0,
+          "device_resets": 0
+        },
+        "recovery_attempts": {
+          "scheduled": 0,
+          "total": 0,
+          "successes_total": 0,
+          "degraded_transitions_total": 0,
+          "backend_switches_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "barge_in_attempts_total": 0,
+          "barge_in_successes_total": 0,
+          "next_reconnect_at_mono": 0.0
+        },
+        "health_score": 1.0,
+        "last_failure_reason": "",
+        "configured_backend": "windows_system_aec",
+        "requested_backend_effective": "windows_system_aec",
+        "aec_requires_reference": false,
+        "backend_chain": [
+          "windows_system_aec",
+          "webrtc_apm",
+          "degraded_no_aec"
+        ],
+        "turn_mode": "server_vad",
+        "session_telemetry_snapshot": {
+          "session_state": "active",
+          "requested_backend": "windows_system_aec",
+          "selected_backend": "windows_system_aec",
+          "product_mode_key": "notebook_builtin_windows_system_aec",
+          "product_status": "Notebook builtin + Windows System AEC",
+          "capture_gate_policy": "windows_system_aec",
+          "recovery_policy": "prefer_current_until_failure",
+          "fallback_chain_step": 0,
+          "fallback_reason": "",
+          "degradation_cause": "",
+          "reconnect_attempts": 0,
+          "recovery_attempts_total": 0,
+          "recovery_successes_total": 0,
+          "recovery_failures_total": 0,
+          "xrun_events_total": 0,
+          "device_resets_total": 0,
+          "reference_health_timeline": [
+            {
+              "mono_ts": 2813.665224,
+              "ready": true,
+              "available_samples": 2400,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.665644,
+              "ready": true,
+              "available_samples": 2401,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666057,
+              "ready": true,
+              "available_samples": 2402,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666437,
+              "ready": true,
+              "available_samples": 2403,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.666813,
+              "ready": true,
+              "available_samples": 2404,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667197,
+              "ready": true,
+              "available_samples": 2405,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.667584,
+              "ready": true,
+              "available_samples": 2406,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668384,
+              "ready": true,
+              "available_samples": 2407,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.668856,
+              "ready": true,
+              "available_samples": 2408,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.669284,
+              "ready": true,
+              "available_samples": 2409,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.66974,
+              "ready": true,
+              "available_samples": 2410,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670166,
+              "ready": true,
+              "available_samples": 2411,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.670613,
+              "ready": true,
+              "available_samples": 2412,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671087,
+              "ready": true,
+              "available_samples": 2413,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.671778,
+              "ready": true,
+              "available_samples": 2414,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672424,
+              "ready": true,
+              "available_samples": 2415,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.672921,
+              "ready": true,
+              "available_samples": 2416,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.673393,
+              "ready": true,
+              "available_samples": 2417,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674415,
+              "ready": true,
+              "available_samples": 2418,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.674936,
+              "ready": true,
+              "available_samples": 2419,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675405,
+              "ready": true,
+              "available_samples": 2420,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.675876,
+              "ready": true,
+              "available_samples": 2421,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.676604,
+              "ready": true,
+              "available_samples": 2422,
+              "callback_age_ms": 8,
+              "state": "ready"
+            },
+            {
+              "mono_ts": 2813.67741,
+              "ready": true,
+              "available_samples": 2423,
+              "callback_age_ms": 8,
+              "state": "ready"
+            }
+          ],
+          "recovery_story": [
+            {
+              "mono_ts": 2813.664932,
+              "category": "session",
+              "reason": "session_started",
+              "action": "start",
+              "session_state": "starting",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665031,
+              "category": "session",
+              "reason": "backend_probe_started",
+              "action": "probe",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "",
+              "cooldown_s": 0.0
+            },
+            {
+              "mono_ts": 2813.665049,
+              "category": "backend_probe",
+              "reason": "backend_probe",
+              "action": "probe_selected",
+              "session_state": "probing",
+              "selected_backend": "windows_system_aec",
+              "target_backend": "windows_system_aec",
+              "cooldown_s": 0.0,
+              "detail": {
+                "degraded": false
+              }
+            }
+          ],
+          "backend_health_score": 1.0,
+          "timings": {
+            "session_start_mono": 2813.664926,
+            "session_probe_start_mono": 2813.66503,
+            "session_probe_done_mono": 2813.665047,
+            "session_active_mono": 2813.665133,
+            "session_stop_mono": 0.0,
+            "uptime_s": 0.013,
+            "active_for_s": 0.013,
+            "probe_duration_s": 0.0,
+            "last_server_activity_age_s": 0.0
+          },
+          "turn_latency": {
+            "turns_total": 24,
+            "responses_completed_total": 24,
+            "avg_first_audio_latency_ms": 0.0,
+            "max_first_audio_latency_ms": 0,
+            "avg_response_latency_ms": 0.0,
+            "max_response_latency_ms": 0
+          },
+          "health": {
+            "reference_ready": true,
+            "reference_health_state": "ready",
+            "reference_available_samples": 2423,
+            "reference_callback_age_ms": 8,
+            "reference_ready_events": 24,
+            "reference_miss_events": 0,
+            "reference_consecutive_misses": 0,
+            "poor_aec_events": 0,
+            "poor_aec_consecutive": 0,
+            "last_failure_reason": "",
+            "pending_events": 0,
+            "pending_mic_chunks": 0,
+            "pending_player_bytes": 0
+          }
+        },
+        "transport_health": {
+          "turn_mode": "server_vad",
+          "is_connected": true,
+          "has_realtime": true
+        },
+        "reason": "response_done",
+        "ui_state": "listening"
+      }
+    }
+  ]
+}

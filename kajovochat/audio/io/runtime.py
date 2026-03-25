@@ -776,6 +776,7 @@ class DuplexAudioSession:
         self._running = False
         self._closed = False
         self._playback_buffer = bytearray()
+        self._max_playback_buffer_bytes = int(self.samplerate * 2 * 2.0)
         self._capture_queue: "queue.Queue[CapturedAudioChunk]" = queue.Queue(maxsize=200)
         self._level: float = 0.0
         self._lip_sync = LipSyncEngine()
@@ -1000,20 +1001,6 @@ class DuplexAudioSession:
         if not pcm_bytes:
             return
         self._ensure_stream()
-        try:
-            target_samples = len(pcm_bytes) // 2
-            if target_samples > 0:
-                with self._lock:
-                    self._echo_reference_enqueued_samples += target_samples
-                    self._echo_reference_chunks.append((self._echo_reference_enqueued_samples, bytes(pcm_bytes)))
-                    while self._echo_reference_chunks:
-                        oldest_end = self._echo_reference_chunks[0][0]
-                        if self._echo_reference_enqueued_samples - oldest_end <= self._echo_reference_max_samples:
-                            break
-                        self._echo_reference_chunks.popleft()
-        except Exception:
-            pass
-
         stream_pcm = pcm_bytes
         if self.stream_samplerate != self.samplerate:
             try:
@@ -1022,7 +1009,16 @@ class DuplexAudioSession:
             except Exception:
                 pass
         with self._lock:
-            self._playback_buffer.extend(stream_pcm)
+            combined = bytes(self._playback_buffer) + bytes(stream_pcm)
+            if len(combined) > self._max_playback_buffer_bytes:
+                combined = combined[-self._max_playback_buffer_bytes :]
+            self._playback_buffer = bytearray(combined)
+            retained_pcm16 = bytes(self._playback_buffer if self.stream_samplerate == self.samplerate else pcm_bytes[-min(len(pcm_bytes), self._max_playback_buffer_bytes) :])
+            retained_samples = len(retained_pcm16) // 2
+            self._echo_reference_enqueued_samples = self._echo_reference_played_samples + retained_samples
+            self._echo_reference_chunks.clear()
+            if retained_samples > 0:
+                self._echo_reference_chunks.append((self._echo_reference_enqueued_samples, retained_pcm16))
 
     def build_render_frame(
         self,

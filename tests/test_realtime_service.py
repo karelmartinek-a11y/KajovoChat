@@ -26,6 +26,7 @@ def test_realtime_service_parses_callbacks() -> None:
     service.on_vad_speech_started = lambda: seen.setdefault("speech_started", True)
     service.on_vad_speech_stopped = lambda: seen.setdefault("speech_stopped", True)
     service.on_response_done = lambda: seen.setdefault("response_done", True)
+    service.on_event = lambda evt: seen.setdefault("event_type", evt.get("type"))
 
     service._handle_event({"type": "input_audio_buffer.speech_started"})
     service._handle_event({"type": "input_audio_buffer.speech_stopped"})
@@ -40,6 +41,7 @@ def test_realtime_service_parses_callbacks() -> None:
 
     assert seen["speech_started"] is True
     assert seen["speech_stopped"] is True
+    assert seen["event_type"] == "input_audio_buffer.speech_started"
     assert seen["user"] == "Ahoj"
     assert seen["delta"] == "Naz"
     assert seen["assistant"] == "Nazdar"
@@ -116,6 +118,31 @@ def test_realtime_service_retries_transient_handshake_failure_before_connecting(
     assert service.is_connected is True
     assert errors == []
     assert statuses.count("Realtime: connected") == 1
+
+
+def test_realtime_service_append_audio_reports_send_failure() -> None:
+    service = RealtimeService(
+        RealtimeConfig(
+            api_key="sk-test-123",
+            model="gpt-realtime",
+            instructions="Test",
+            voice="alloy",
+        )
+    )
+
+    class _FailingWs:
+        def send(self, data: str) -> None:
+            del data
+            raise RuntimeError("socket closed")
+
+    errors: list[str] = []
+    service.on_error = errors.append
+    service._ws = _FailingWs()
+    service._connected.set()
+    service._closed.clear()
+
+    assert service.append_audio_pcm16(b"\x01\x02") is False
+    assert errors == ["socket closed"]
 
 
 def test_realtime_service_raises_last_handshake_error_after_retry_exhaustion(monkeypatch) -> None:

@@ -112,6 +112,7 @@ class AudioSessionManager:
             speech_stopped_sink=speech_stopped_sink,
             response_done_sink=response_done_sink,
             activity_sink=self.telemetry.note_server_activity,
+            event_log_sink=log_sink,
             model=model,
             voice=voice,
             noise_reduction=noise_reduction,
@@ -137,6 +138,11 @@ class AudioSessionManager:
             stop_playback=self.stop_render_output,
         )
         self.device_graph = DuplexDeviceGraph()
+        self._capture_ready_timeout_s = 1.2
+        self._capture_ready_poll_s = 0.02
+        self._min_commit_audio_ms = 100.0
+        self._stale_server_turn_clear_after_s = 1.5
+        self._ignore_server_speech_stopped_until_next_start = False
 
     @property
     def mic_enabled(self) -> threading.Event:
@@ -212,6 +218,7 @@ class AudioSessionManager:
 
     def reset_voice_gate_runtime(self) -> None:
         self._voice_gate.reset_runtime()
+        self._ignore_server_speech_stopped_until_next_start = False
 
     def note_playback_activity(self, *, is_playing_out: bool, now_monotonic: float, trailing_hold_s: float) -> None:
         self._voice_gate.update_playback_reference_state(
@@ -387,6 +394,14 @@ class AudioSessionManager:
             self._set_session_state(SessionState.IDLE, reason=FailureReason.USER_STOP.value)
 
     def _start_session(self, *, mode: str, turn_mode: str, caption: str, reset_transport_input: bool) -> None:
+        if self.session_state == SessionState.FAILED:
+            self.shutdown_runtime_resources()
+            self._mode_setter("idle")
+            self.awaiting_transcript = False
+            self.reset_runtime_tracking()
+            self.reset_voice_gate_runtime()
+            self.telemetry.clear_reconnect()
+            self._set_session_state(SessionState.IDLE, reason="restart_after_failure")
         if self._mode_supplier() == mode and self.session_state in {
             SessionState.STARTING,
             SessionState.PROBING,
@@ -401,66 +416,142 @@ class AudioSessionManager:
             return
         self._mode_setter(mode)
         self._set_session_state(SessionState.STARTING, reason=f"{mode}_requested")
-        self._resolve_devices()
-        self._start_session_if_needed()
-        self.reset_runtime_tracking()
-        self._require_devices_ready()
-        self.device_graph.input_device = self._input_device_getter()
-        self.device_graph.output_device = self._output_device_getter()
-        self.device_graph.audio_mode = self._audio_mode_supplier() or "notebook_builtin"
-        existing_duplex = self._runtime_resources.duplex
-        if existing_duplex is not None:
+        try:
+            self._resolve_devices()
+            self._start_session_if_needed()
+            self.reset_runtime_tracking()
+            self._require_devices_ready()
+            self.device_graph.input_device = self._input_device_getter()
+            self.device_graph.output_device = self._output_device_getter()
+            self.device_graph.audio_mode = self._audio_mode_supplier() or "notebook_builtin"
+            existing_duplex = self._runtime_resources.duplex
+            if existing_duplex is not None:
+                try:
+                    existing_duplex.stop()
+                except Exception:
+                    pass
+            duplex = DuplexAudioSession(
+                samplerate=24000,
+                input_device=self.device_graph.input_device,
+                output_device=self.device_graph.output_device,
+                blocksize=self._preferred_frame_size(),
+            )
+            self._runtime_resources.duplex = duplex
+            self._runtime_resources.player = duplex.player
+            self._runtime_resources.mic = duplex.mic
+            self.device_graph.duplex = duplex
+            self.device_graph.player = duplex.player
+            self.device_graph.mic = duplex.mic
+            requested_backend = self.aec_engine.requested_backend_for_audio_mode(self.device_graph.audio_mode)
+            self.telemetry.mark_session_started(
+                requested_backend=requested_backend,
+                device_fingerprint=self._device_fingerprint_supplier(),
+                audio_mode=self.device_graph.audio_mode,
+            )
+            self._set_session_state(SessionState.PROBING, reason="backend_selection")
+            self.telemetry.mark_probe_started()
+            decision = self.aec_engine.select_backend(
+                audio_mode=self.device_graph.audio_mode,
+                windows_healthcheck=self._probe_windows_system_aec,
+                webrtc_healthcheck=self._probe_webrtc_apm,
+            )
+            self.telemetry.mark_probe_completed()
+            self.recovery.record_probe_outcome(
+                requested_backend=decision.requested_backend,
+                selected_backend=decision.selected_backend,
+                fallback_reason=decision.fallback_reason,
+                degraded=decision.degraded,
+            )
+            self._apply_backend_selection(decision, reason="session_start")
+            rt = self.transport.ensure_connected(turn_mode, self.telemetry.reconnect_attempts)
+            self._runtime_resources.rt = self.transport.realtime
+            self._start_rt_loop()
+            if reset_transport_input:
+                rt.clear_input_audio()
+                self._log_sink("audio_push_to_realtime", self._build_log_payload(turn_mode=turn_mode, phase="clear_input"))
+            duplex.start_mic()
+            capture_snapshot = self._wait_for_capture_ready(duplex)
+            self._log_sink("audio_capture_ready", self._build_log_payload(capture_snapshot=capture_snapshot))
+            self._voice_gate.open()
+            self.telemetry.mark_session_activated()
+            final_state = SessionState.DEGRADED if decision.degraded else SessionState.ACTIVE
+            self._set_session_state(final_state, reason="session_started")
+            if getattr(duplex.mic, "using_resampler", False):
+                self._caption_sink(f"Mikrofon jede na {duplex.mic.input_samplerate} Hz, resampluji na 24000 Hz.")
+            self._caption_sink(caption)
+        except Exception as exc:
+            self._log_sink(
+                "audio_session_start_failed",
+                self._build_log_payload(
+                    reason="session_start_exception",
+                    requested_mode=mode,
+                    turn_mode=turn_mode,
+                    error_type=exc.__class__.__name__,
+                    message=str(exc),
+                ),
+            )
+            self.fail(self._startup_error_message(exc), reason=FailureReason.SESSION_START_FAILED.value)
+
+
+    def _capture_runtime_snapshot(self, duplex: object) -> dict[str, int | bool]:
+        snapshot: dict[str, int | bool] = {
+            "captured_samples": 0,
+            "pending_chunk_count": 0,
+            "capture_age_ms": -1,
+            "mic_started": False,
+        }
+        if hasattr(duplex, "get_runtime_state"):
             try:
-                existing_duplex.stop()
+                runtime_state = duplex.get_runtime_state()
             except Exception:
-                pass
-        duplex = DuplexAudioSession(
-            samplerate=24000,
-            input_device=self.device_graph.input_device,
-            output_device=self.device_graph.output_device,
-            blocksize=self._preferred_frame_size(),
-        )
-        self._runtime_resources.duplex = duplex
-        self._runtime_resources.player = duplex.player
-        self._runtime_resources.mic = duplex.mic
-        self.device_graph.duplex = duplex
-        self.device_graph.player = duplex.player
-        self.device_graph.mic = duplex.mic
-        requested_backend = self.aec_engine.requested_backend_for_audio_mode(self.device_graph.audio_mode)
-        self.telemetry.mark_session_started(
-            requested_backend=requested_backend,
-            device_fingerprint=self._device_fingerprint_supplier(),
-            audio_mode=self.device_graph.audio_mode,
-        )
-        self._set_session_state(SessionState.PROBING, reason="backend_selection")
-        self.telemetry.mark_probe_started()
-        decision = self.aec_engine.select_backend(
-            audio_mode=self.device_graph.audio_mode,
-            windows_healthcheck=self._probe_windows_system_aec,
-            webrtc_healthcheck=self._probe_webrtc_apm,
-        )
-        self.telemetry.mark_probe_completed()
-        self.recovery.record_probe_outcome(
-            requested_backend=decision.requested_backend,
-            selected_backend=decision.selected_backend,
-            fallback_reason=decision.fallback_reason,
-            degraded=decision.degraded,
-        )
-        self._apply_backend_selection(decision, reason="session_start")
-        rt = self.transport.ensure_connected(turn_mode, self.telemetry.reconnect_attempts)
-        self._runtime_resources.rt = self.transport.realtime
-        self._start_rt_loop()
-        if reset_transport_input:
-            rt.clear_input_audio()
-            self._log_sink("audio_push_to_realtime", self._build_log_payload(turn_mode=turn_mode, phase="clear_input"))
-        duplex.start_mic()
-        self._voice_gate.open()
-        self.telemetry.mark_session_activated()
-        final_state = SessionState.DEGRADED if decision.degraded else SessionState.ACTIVE
-        self._set_session_state(final_state, reason="session_started")
-        if getattr(duplex.mic, "using_resampler", False):
-            self._caption_sink(f"Mikrofon jede na {duplex.mic.input_samplerate} Hz, resampluji na 24000 Hz.")
-        self._caption_sink(caption)
+                runtime_state = {}
+            snapshot["captured_samples"] = int(runtime_state.get("captured_samples", 0) or 0)
+            snapshot["pending_chunk_count"] = int(runtime_state.get("pending_chunk_count", 0) or 0)
+            snapshot["capture_age_ms"] = int(runtime_state.get("capture_age_ms", -1) or -1)
+        mic = getattr(duplex, "mic", None)
+        if mic is not None:
+            snapshot["mic_started"] = bool(getattr(mic, "started", False))
+            if snapshot["captured_samples"] <= 0:
+                snapshot["captured_samples"] = int(getattr(mic, "_captured_samples", 0) or 0)
+            if snapshot["capture_age_ms"] < 0:
+                last_capture_ns = int(getattr(mic, "_last_capture_mono_ns", 0) or 0)
+                if last_capture_ns > 0:
+                    snapshot["capture_age_ms"] = int((time.monotonic_ns() - last_capture_ns) / 1_000_000)
+        return snapshot
+
+    def _capture_snapshot_ready(self, snapshot: dict[str, int | bool]) -> bool:
+        captured_samples = int(snapshot.get("captured_samples", 0) or 0)
+        pending_chunk_count = int(snapshot.get("pending_chunk_count", 0) or 0)
+        capture_age_ms = int(snapshot.get("capture_age_ms", -1) or -1)
+        mic_started = bool(snapshot.get("mic_started", False))
+        if captured_samples > 0 or pending_chunk_count > 0:
+            return True
+        if 0 <= capture_age_ms <= 500:
+            return True
+        return bool(mic_started and captured_samples == 0 and pending_chunk_count == 0 and capture_age_ms < 0)
+
+    def _wait_for_capture_ready(self, duplex: object) -> dict[str, int | bool]:
+        deadline = time.monotonic() + float(self._capture_ready_timeout_s)
+        last_snapshot = self._capture_runtime_snapshot(duplex)
+        while True:
+            if self._capture_snapshot_ready(last_snapshot):
+                return last_snapshot
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "Mikrofonní capture callback se po startu nerozběhl. "
+                    f"Snapshot: {last_snapshot}"
+                )
+            time.sleep(float(self._capture_ready_poll_s))
+            last_snapshot = self._capture_runtime_snapshot(duplex)
+
+    def _startup_error_message(self, exc: Exception) -> str:
+        message = (str(exc) or exc.__class__.__name__).strip()
+        lowered = message.lower()
+        if any(marker in lowered for marker in ("mikrofon", "reproduktor", "stream", "samplerate", "zařízení", "device", "audio", "capture")):
+            help_text = format_device_help()
+            if help_text and help_text not in message:
+                return f"{message}\n\n{help_text}"
+        return message
 
     def _apply_backend_selection(self, decision: BackendSelectionDecision, *, reason: str) -> None:
         normalized_backend = normalize_audio_aec_mode(decision.selected_backend)
@@ -588,6 +679,22 @@ class AudioSessionManager:
     def handle_transport_error(self, message: str) -> None:
         self.recovery.handle_transport_error(message, session_state=self.session_state.value)
 
+    def handle_runtime_fatal(self, exc: Exception, *, stage: str) -> None:
+        message = (str(exc) or exc.__class__.__name__).strip()
+        failure_reason = self._classify_failure_reason(message)
+        self._log_sink(
+            "audio_runtime_fatal",
+            self._build_log_payload(
+                stage=stage,
+                error_type=exc.__class__.__name__,
+                message=message,
+                failure_reason=failure_reason,
+            ),
+        )
+        if self.session_state in {SessionState.IDLE, SessionState.STOPPING, SessionState.FAILED}:
+            return
+        self.fail(self._startup_error_message(exc), reason=failure_reason)
+
     def note_assistant_output_started(self) -> None:
         self.note_tts_rendering(rendering_active=True, now_monotonic=__import__("time").monotonic())
         if self.session_state in {SessionState.ACTIVE, SessionState.DEGRADED}:
@@ -619,6 +726,9 @@ class AudioSessionManager:
 
     def note_barge_in_result(self, *, success: bool, reason: str = "") -> None:
         self.recovery.note_barge_in_result(success=success, reason=reason)
+
+    def note_input_audio_appended(self, pcm_bytes: int) -> None:
+        self.telemetry.note_input_audio_appended(pcm_bytes)
 
     def handle_user_transcript(self, text: str) -> None:
         normalized = (text or "").strip()
@@ -660,6 +770,7 @@ class AudioSessionManager:
         now = time.monotonic()
         runtime = self.voice_gate_runtime
         runtime.server_turn_active = True
+        self._ignore_server_speech_stopped_until_next_start = False
         runtime.local_turn_active = True
         runtime.local_voice_streak = 0
         runtime.local_silence_streak = 0
@@ -673,6 +784,9 @@ class AudioSessionManager:
 
     def handle_speech_stopped(self) -> None:
         runtime = self.voice_gate_runtime
+        if self._ignore_server_speech_stopped_until_next_start and not runtime.server_turn_active:
+            self._log_sink("speech_stopped_ignored", self._build_log_payload(reason="already_committed"))
+            return
         if self.awaiting_transcript and not runtime.server_turn_active:
             self._log_sink("speech_stopped_ignored", self._build_log_payload(reason="already_committed"))
             return
@@ -683,18 +797,36 @@ class AudioSessionManager:
         runtime.speech_started_at = 0.0
         runtime.last_voice_activity_at = 0.0
         self.awaiting_transcript = True
+        self._ignore_server_speech_stopped_until_next_start = False
         self.note_user_turn_committed()
         self.telemetry.note_turn_committed()
         self.telemetry.note_server_activity()
         self._log_sink("speech_stopped", self._build_log_payload())
 
-    def maybe_force_server_vad_turn_commit(self, *, input_level: float, voice_likelihood: float, now_monotonic: float) -> bool:
+    def maybe_force_server_vad_turn_commit(
+        self,
+        *,
+        input_level: float,
+        voice_likelihood: float,
+        now_monotonic: float,
+        drop_chunk: bool = False,
+        playback_active: bool = False,
+        barge_in_confirmed: bool = False,
+    ) -> bool:
         runtime = self.voice_gate_runtime
         if self._mode_supplier() != "handsfree":
             return False
         if self.session_state not in {SessionState.ACTIVE, SessionState.DEGRADED}:
             return False
         if self.awaiting_transcript:
+            return False
+        if float(now_monotonic) < float(runtime.post_response_hold_until):
+            runtime.local_voice_streak = 0
+            runtime.local_silence_streak = 0
+            return False
+        if drop_chunk and not runtime.local_turn_active:
+            runtime.local_voice_streak = 0
+            runtime.local_silence_streak = 0
             return False
         active_chunk = bool(float(voice_likelihood) >= 0.28 or float(input_level) >= 0.055)
         silent_chunk = bool(float(voice_likelihood) < 0.18 and float(input_level) < 0.03)
@@ -709,6 +841,10 @@ class AudioSessionManager:
             runtime.local_voice_streak = 0
 
         if not runtime.local_turn_active and runtime.local_voice_streak >= 3:
+            if barge_in_confirmed:
+                return False
+            if playback_active:
+                return False
             runtime.local_turn_active = True
             runtime.speech_started_at = float(now_monotonic)
             runtime.last_voice_activity_at = float(now_monotonic)
@@ -732,10 +868,90 @@ class AudioSessionManager:
         silence_commit = bool(runtime.local_turn_active and runtime.local_silence_streak >= 18 and active_for_s >= 0.45)
         if not watchdog_commit and not silence_commit:
             return False
+        fallback_reason = "server_vad_watchdog" if watchdog_commit else "local_silence"
+        return self._commit_current_server_vad_turn(
+            now_monotonic=now_monotonic,
+            fallback_reason=fallback_reason,
+            local_silence_streak=int(runtime.local_silence_streak),
+            silence_for_s=silence_for_s,
+            active_for_s=active_for_s,
+            server_idle_for_s=server_idle_for_s,
+            input_level=float(input_level),
+            voice_likelihood=float(voice_likelihood),
+        )
+
+    def maybe_force_server_vad_idle_watchdog(self, *, now_monotonic: float) -> bool:
+        runtime = self.voice_gate_runtime
+        if self._mode_supplier() != "handsfree":
+            return False
+        if self.session_state not in {SessionState.ACTIVE, SessionState.DEGRADED}:
+            return False
+        if self.awaiting_transcript:
+            return False
+        if not runtime.server_turn_active and not runtime.local_turn_active:
+            return False
+        active_for_s = max(0.0, float(now_monotonic) - float(runtime.speech_started_at or now_monotonic))
+        server_idle_for_s = max(0.0, float(now_monotonic) - float(self.telemetry.last_server_activity_at or now_monotonic))
+        if active_for_s < 6.0 or server_idle_for_s < 4.0:
+            return False
+        silence_for_s = max(0.0, float(now_monotonic) - float(runtime.last_voice_activity_at or runtime.speech_started_at or now_monotonic))
+        return self._commit_current_server_vad_turn(
+            now_monotonic=now_monotonic,
+            fallback_reason="server_vad_watchdog_idle",
+            local_silence_streak=int(runtime.local_silence_streak),
+            silence_for_s=silence_for_s,
+            active_for_s=active_for_s,
+            server_idle_for_s=server_idle_for_s,
+            input_level=0.0,
+            voice_likelihood=0.0,
+        )
+
+    def _commit_current_server_vad_turn(
+        self,
+        *,
+        now_monotonic: float,
+        fallback_reason: str,
+        local_silence_streak: int,
+        silence_for_s: float,
+        active_for_s: float,
+        server_idle_for_s: float,
+        input_level: float,
+        voice_likelihood: float,
+    ) -> bool:
         rt = self._runtime_resources.rt or self.transport.realtime
         if rt is None:
             return False
-        committed_silence_streak = int(runtime.local_silence_streak)
+        runtime = self.voice_gate_runtime
+        buffered_audio_ms = self.telemetry.current_turn_input_audio_ms()
+        if buffered_audio_ms < float(self._min_commit_audio_ms):
+            server_turn_active = bool(runtime.server_turn_active)
+            stale_server_turn = bool(
+                server_turn_active
+                and buffered_audio_ms <= 0.0
+                and float(server_idle_for_s) >= float(self._stale_server_turn_clear_after_s)
+            )
+            runtime.local_turn_active = False
+            runtime.local_voice_streak = 0
+            runtime.local_silence_streak = 0
+            if stale_server_turn:
+                runtime.server_turn_active = False
+            if not server_turn_active or stale_server_turn:
+                runtime.speech_started_at = 0.0
+                runtime.last_voice_activity_at = 0.0
+            self._log_sink(
+                "speech_commit_skipped_small_buffer",
+                self._build_log_payload(
+                    fallback_reason=fallback_reason,
+                    buffered_audio_ms=round(float(buffered_audio_ms), 3),
+                    min_commit_audio_ms=round(float(self._min_commit_audio_ms), 3),
+                    local_silence_streak=int(local_silence_streak),
+                    server_turn_active=server_turn_active,
+                    stale_server_turn_cleared=stale_server_turn,
+                    input_level=round(float(input_level), 3),
+                    voice_likelihood=round(float(voice_likelihood), 3),
+                ),
+            )
+            return False
         runtime.server_turn_active = False
         runtime.local_turn_active = False
         runtime.local_voice_streak = 0
@@ -743,31 +959,36 @@ class AudioSessionManager:
         runtime.speech_started_at = 0.0
         runtime.last_voice_activity_at = 0.0
         self.awaiting_transcript = True
+        self._ignore_server_speech_stopped_until_next_start = True
         self.note_user_turn_committed()
-        self.telemetry.note_turn_committed()
         self.telemetry.note_server_activity()
         rt.commit_input_audio()
         rt.request_response()
+        self.telemetry.note_turn_committed()
         self._log_sink(
             "speech_stopped_local_fallback",
             self._build_log_payload(
-                fallback_reason="server_vad_watchdog" if watchdog_commit else "local_silence",
-                local_silence_streak=committed_silence_streak,
+                fallback_reason=fallback_reason,
+                local_silence_streak=int(local_silence_streak),
                 silence_for_s=round(silence_for_s, 3),
                 active_for_s=round(active_for_s, 3),
                 server_idle_for_s=round(server_idle_for_s, 3),
                 input_level=round(float(input_level), 3),
                 voice_likelihood=round(float(voice_likelihood), 3),
+                triggered_without_chunk=bool(input_level <= 0.0 and voice_likelihood <= 0.0),
+                now_monotonic=round(float(now_monotonic), 3),
             ),
         )
         return True
 
     def handle_response_done(self) -> None:
         runtime = self.voice_gate_runtime
+        now = time.monotonic()
         runtime.server_turn_active = False
         runtime.local_turn_active = False
         runtime.local_voice_streak = 0
         runtime.local_silence_streak = 0
+        runtime.post_response_hold_until = max(float(runtime.post_response_hold_until), now + 0.4)
         runtime.speech_started_at = 0.0
         runtime.last_voice_activity_at = 0.0
         total_latency_ms = self.telemetry.note_response_done()
@@ -777,6 +998,13 @@ class AudioSessionManager:
             self._set_presentation_state(SessionPresentationState.QUIESCENT, reason="ptt_response_complete")
         self.awaiting_transcript = False
         self.telemetry.note_server_activity()
+        self._log_sink(
+            "waiting_for_user_input",
+            {
+                "message": "čekám na hlasové vstupy",
+                "post_response_hold_until": float(runtime.post_response_hold_until),
+            },
+        )
 
     def check_runtime_health(self) -> None:
         pending_snapshot = self.runtime_pending_snapshot()
@@ -792,6 +1020,7 @@ class AudioSessionManager:
 
         gate_runtime = self.voice_gate_runtime
         now = time.monotonic()
+        self.maybe_force_server_vad_idle_watchdog(now_monotonic=now)
         if (
             now - self._last_echo_stat_log_at >= 5.0
             and (gate_runtime.echo_drop_count != gate_runtime.last_echo_drop_reported or gate_runtime.barge_in_chunk_count != gate_runtime.last_barge_in_reported)

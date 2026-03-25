@@ -24,6 +24,7 @@ class RealtimeTransportBridge:
         speech_stopped_sink: Callable[[], None],
         response_done_sink: Callable[[], None],
         activity_sink: Callable[[], None],
+        event_log_sink: Callable[[str, dict[str, object]], None],
         model: str,
         voice: str,
         noise_reduction: str,
@@ -46,6 +47,7 @@ class RealtimeTransportBridge:
         self._speech_stopped_sink = speech_stopped_sink
         self._response_done_sink = response_done_sink
         self._activity_sink = activity_sink
+        self._event_log_sink = event_log_sink
         self.model = model
         self.voice = voice
         self.noise_reduction = noise_reduction
@@ -149,6 +151,34 @@ class RealtimeTransportBridge:
             self._activity_sink()
             self._response_done_sink()
 
+        def _event(evt: dict) -> None:
+            etype = str(evt.get("type") or "").strip()
+            if not etype:
+                return
+            if etype in {"response.output_audio.delta", "response.audio.delta", "response.output_audio_transcript.delta"}:
+                return
+            payload: dict[str, object] = {"event_type": etype}
+            transcript = evt.get("transcript")
+            if isinstance(transcript, str) and transcript:
+                payload["transcript_chars"] = len(transcript)
+            delta = evt.get("delta")
+            if isinstance(delta, str) and etype not in {"session.created", "session.updated"}:
+                payload["delta_chars"] = len(delta)
+            item_id = evt.get("item_id")
+            if isinstance(item_id, str) and item_id:
+                payload["item_id"] = item_id
+            response = evt.get("response")
+            if isinstance(response, dict):
+                response_id = response.get("id")
+                if isinstance(response_id, str) and response_id:
+                    payload["response_id"] = response_id
+            error = evt.get("error")
+            if isinstance(error, dict):
+                message = error.get("message")
+                if isinstance(message, str) and message:
+                    payload["message"] = message
+            self._event_log_sink("realtime_server_event", payload)
+
         rt.on_status = _status
         rt.on_error = _error
         rt.on_user_transcript = _user_transcript
@@ -158,3 +188,4 @@ class RealtimeTransportBridge:
         rt.on_vad_speech_started = _speech_started
         rt.on_vad_speech_stopped = _speech_stopped
         rt.on_response_done = _response_done
+        rt.on_event = _event

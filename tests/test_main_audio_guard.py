@@ -238,6 +238,25 @@ def test_double_talk_is_not_dropped_when_voice_is_strong() -> None:
     assert reason == ""
 
 
+def test_moderate_playback_bleed_is_dropped_before_barge_in_threshold() -> None:
+    dropped, reason = should_drop_mic_chunk(
+        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=0.38,
+        input_level=0.165,
+        output_level=0.09,
+        residual_level=0.003,
+        voice_likelihood=0.366,
+        double_talk=False,
+        aec_quality=0.18,
+    )
+
+    assert dropped is True
+    assert reason == "playback_voice_echo"
+
+
 def test_saved_calibration_matches_by_device_fingerprint() -> None:
     settings = AppSettings()
     worker = ConversationWorker(settings)

@@ -34,6 +34,7 @@ class VoiceGateThresholds:
 @dataclass
 class VoiceGateRuntimeState:
     mic_suppressed_until: float = 0.0
+    post_response_hold_until: float = 0.0
     echo_drop_count: int = 0
     barge_in_chunk_count: int = 0
     barge_in_streak: int = 0
@@ -67,6 +68,7 @@ class VoiceGateSnapshot:
     cached_reference_age_s: float
     tts_start_hold_until: float
     tts_tail_hold_until: float
+    post_response_hold_until: float
     in_tts_hold: bool
     mic_capture_window_active: bool
 
@@ -181,6 +183,7 @@ class VoiceGate:
             cached_reference_age_s=max(0.0, now_monotonic - float(runtime.cached_reference_at)) if runtime.cached_reference_at > 0.0 else float("inf"),
             tts_start_hold_until=float(runtime.tts_start_hold_until),
             tts_tail_hold_until=float(runtime.tts_tail_hold_until),
+            post_response_hold_until=float(runtime.post_response_hold_until),
             in_tts_hold=in_tts_hold,
             mic_capture_window_active=bool(mode == "handsfree" and now_monotonic < runtime.mic_suppressed_until),
         )
@@ -349,7 +352,14 @@ def should_drop_mic_chunk(*, mode: str, guard_active: bool, playback_active: boo
         return False, ""
     if policy.disable_echo_drop:
         return False, ""
+    min_voice_likelihood = 0.42
+    if policy.name == "degraded_no_aec":
+        min_voice_likelihood = 0.68
+    elif policy.name == "headset_clean":
+        min_voice_likelihood = 0.34
     strong_user = bool(input_level >= thresholds.barge_in_min_input_level and input_level >= max(thresholds.barge_in_min_input_level, output_level * thresholds.barge_in_output_ratio))
+    if playback_active and not double_talk and voice_likelihood < min_voice_likelihood and residual <= max(0.02, output_level * 0.2):
+        return True, "playback_voice_echo"
     if double_talk and (voice_likelihood >= 0.42 or strong_user):
         return False, ""
     if similarity >= thresholds.echo_similarity_drop and not strong_user and residual <= max(0.08, output_level * 1.05):
