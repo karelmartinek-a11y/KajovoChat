@@ -24,10 +24,7 @@ class ConversationAudioWorkerControls:
     def request_stop(self) -> None:
         owner = self._owner
         owner._stop_all.set()
-        owner._mode = "idle"
-        owner._session_manager.shutdown_runtime_resources()
-        owner._session_manager.reset_runtime_tracking()
-        owner._session_manager.reset_voice_gate_runtime()
+        owner._session_manager.request_stop()
         owner.input_level.emit(0.0)
         owner.output_level.emit(0.0)
         owner.output_pose.emit(self._closed_pose_factory())

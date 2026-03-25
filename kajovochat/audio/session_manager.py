@@ -373,7 +373,9 @@ class AudioSessionManager:
         self._caption_sink("PTT: čekám na odpověď…")
 
     def request_stop(self) -> None:
-        self._set_session_state(SessionState.STOPPING, reason=FailureReason.USER_STOP.value)
+        should_transition = self.session_state != SessionState.IDLE
+        if should_transition:
+            self._set_session_state(SessionState.STOPPING, reason=FailureReason.USER_STOP.value)
         self.awaiting_transcript = False
         self.shutdown_runtime_resources()
         self._mode_setter("idle")
@@ -381,9 +383,22 @@ class AudioSessionManager:
         self.reset_voice_gate_runtime()
         self.telemetry.clear_reconnect()
         self.telemetry.mark_session_stopped()
-        self._set_session_state(SessionState.IDLE, reason=FailureReason.USER_STOP.value)
+        if should_transition:
+            self._set_session_state(SessionState.IDLE, reason=FailureReason.USER_STOP.value)
 
     def _start_session(self, *, mode: str, turn_mode: str, caption: str, reset_transport_input: bool) -> None:
+        if self._mode_supplier() == mode and self.session_state in {
+            SessionState.STARTING,
+            SessionState.PROBING,
+            SessionState.ACTIVE,
+            SessionState.DEGRADED,
+            SessionState.RECOVERING,
+        }:
+            self._log_sink(
+                "audio_start_ignored",
+                self._build_log_payload(reason="duplicate_start", requested_mode=mode),
+            )
+            return
         self._mode_setter(mode)
         self._set_session_state(SessionState.STARTING, reason=f"{mode}_requested")
         self._resolve_devices()
@@ -642,6 +657,14 @@ class AudioSessionManager:
             self.stop_render_output()
         except Exception:
             pass
+        now = time.monotonic()
+        runtime = self.voice_gate_runtime
+        runtime.server_turn_active = True
+        runtime.local_turn_active = True
+        runtime.local_voice_streak = 0
+        runtime.local_silence_streak = 0
+        runtime.speech_started_at = now
+        runtime.last_voice_activity_at = now
         self.awaiting_transcript = False
         self.note_speech_started(during_assistant_output=bool(self.telemetry.response_first_audio_at > 0.0))
         self.telemetry.clear_current_turn()
@@ -649,13 +672,104 @@ class AudioSessionManager:
         self._log_sink("speech_started", self._build_log_payload())
 
     def handle_speech_stopped(self) -> None:
+        runtime = self.voice_gate_runtime
+        if self.awaiting_transcript and not runtime.server_turn_active:
+            self._log_sink("speech_stopped_ignored", self._build_log_payload(reason="already_committed"))
+            return
+        runtime.server_turn_active = False
+        runtime.local_turn_active = False
+        runtime.local_voice_streak = 0
+        runtime.local_silence_streak = 0
+        runtime.speech_started_at = 0.0
+        runtime.last_voice_activity_at = 0.0
         self.awaiting_transcript = True
         self.note_user_turn_committed()
         self.telemetry.note_turn_committed()
         self.telemetry.note_server_activity()
         self._log_sink("speech_stopped", self._build_log_payload())
 
+    def maybe_force_server_vad_turn_commit(self, *, input_level: float, voice_likelihood: float, now_monotonic: float) -> bool:
+        runtime = self.voice_gate_runtime
+        if self._mode_supplier() != "handsfree":
+            return False
+        if self.session_state not in {SessionState.ACTIVE, SessionState.DEGRADED}:
+            return False
+        if self.awaiting_transcript:
+            return False
+        active_chunk = bool(float(voice_likelihood) >= 0.28 or float(input_level) >= 0.055)
+        silent_chunk = bool(float(voice_likelihood) < 0.18 and float(input_level) < 0.03)
+        if active_chunk:
+            runtime.local_voice_streak += 1
+            runtime.local_silence_streak = 0
+            runtime.last_voice_activity_at = float(now_monotonic)
+        elif silent_chunk:
+            runtime.local_silence_streak += 1
+            runtime.local_voice_streak = 0
+        else:
+            runtime.local_voice_streak = 0
+
+        if not runtime.local_turn_active and runtime.local_voice_streak >= 3:
+            runtime.local_turn_active = True
+            runtime.speech_started_at = float(now_monotonic)
+            runtime.last_voice_activity_at = float(now_monotonic)
+            self._log_sink(
+                "speech_started_local_fallback",
+                self._build_log_payload(
+                    input_level=round(float(input_level), 3),
+                    voice_likelihood=round(float(voice_likelihood), 3),
+                ),
+            )
+
+        if not runtime.server_turn_active and not runtime.local_turn_active:
+            return False
+
+        if active_chunk:
+            runtime.last_voice_activity_at = float(now_monotonic)
+        silence_for_s = max(0.0, float(now_monotonic) - float(runtime.last_voice_activity_at or runtime.speech_started_at or now_monotonic))
+        active_for_s = max(0.0, float(now_monotonic) - float(runtime.speech_started_at or now_monotonic))
+        server_idle_for_s = max(0.0, float(now_monotonic) - float(self.telemetry.last_server_activity_at or now_monotonic))
+        watchdog_commit = bool(active_for_s >= 6.0 and server_idle_for_s >= 4.0)
+        silence_commit = bool(runtime.local_turn_active and runtime.local_silence_streak >= 18 and active_for_s >= 0.45)
+        if not watchdog_commit and not silence_commit:
+            return False
+        rt = self._runtime_resources.rt or self.transport.realtime
+        if rt is None:
+            return False
+        committed_silence_streak = int(runtime.local_silence_streak)
+        runtime.server_turn_active = False
+        runtime.local_turn_active = False
+        runtime.local_voice_streak = 0
+        runtime.local_silence_streak = 0
+        runtime.speech_started_at = 0.0
+        runtime.last_voice_activity_at = 0.0
+        self.awaiting_transcript = True
+        self.note_user_turn_committed()
+        self.telemetry.note_turn_committed()
+        self.telemetry.note_server_activity()
+        rt.commit_input_audio()
+        rt.request_response()
+        self._log_sink(
+            "speech_stopped_local_fallback",
+            self._build_log_payload(
+                fallback_reason="server_vad_watchdog" if watchdog_commit else "local_silence",
+                local_silence_streak=committed_silence_streak,
+                silence_for_s=round(silence_for_s, 3),
+                active_for_s=round(active_for_s, 3),
+                server_idle_for_s=round(server_idle_for_s, 3),
+                input_level=round(float(input_level), 3),
+                voice_likelihood=round(float(voice_likelihood), 3),
+            ),
+        )
+        return True
+
     def handle_response_done(self) -> None:
+        runtime = self.voice_gate_runtime
+        runtime.server_turn_active = False
+        runtime.local_turn_active = False
+        runtime.local_voice_streak = 0
+        runtime.local_silence_streak = 0
+        runtime.speech_started_at = 0.0
+        runtime.last_voice_activity_at = 0.0
         total_latency_ms = self.telemetry.note_response_done()
         self._log_sink("response_done", self._build_log_payload(total_latency_ms=total_latency_ms))
         self.note_response_done()

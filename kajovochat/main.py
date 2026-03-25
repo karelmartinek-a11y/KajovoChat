@@ -372,6 +372,12 @@ class ConversationWorker(QObject):
     def _start_session_if_needed(self) -> None:
         self._audio_lifecycle.start_session_if_needed()
 
+    def _start_rt_loop(self) -> None:
+        self._rt_runtime_controller.start()
+
+    def _stop_rt_loop(self, timeout_s: float = 1.0) -> None:
+        self._rt_runtime_controller.stop(timeout_s=timeout_s)
+
     def _end_session(self) -> None:
         self._audio_lifecycle.end_session()
 

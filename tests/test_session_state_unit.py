@@ -14,6 +14,7 @@ def test_session_state_transition_model_matches_target_architecture() -> None:
     validate_session_transition(SessionState.IDLE, SessionState.STARTING)
     validate_session_transition(SessionState.STARTING, SessionState.PROBING)
     validate_session_transition(SessionState.PROBING, SessionState.ACTIVE)
+    validate_session_transition(SessionState.PROBING, SessionState.RECOVERING)
     validate_session_transition(SessionState.ACTIVE, SessionState.RECOVERING)
     validate_session_transition(SessionState.RECOVERING, SessionState.DEGRADED)
     validate_session_transition(SessionState.DEGRADED, SessionState.STOPPING)

@@ -47,6 +47,12 @@ class VoiceGateRuntimeState:
     cached_reference_at: float = 0.0
     tts_start_hold_until: float = 0.0
     tts_tail_hold_until: float = 0.0
+    server_turn_active: bool = False
+    speech_started_at: float = 0.0
+    last_voice_activity_at: float = 0.0
+    local_turn_active: bool = False
+    local_voice_streak: int = 0
+    local_silence_streak: int = 0
 
 
 @dataclass(frozen=True)

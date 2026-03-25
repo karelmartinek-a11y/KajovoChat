@@ -400,6 +400,11 @@ class ConversationAudioRuntimeLoop:
                             double_talk=double_talk,
                         )
                         gate_outcome = gate_decision.side_effects
+                        owner._session_manager.maybe_force_server_vad_turn_commit(
+                            input_level=float(gate_decision.effective_input_level),
+                            voice_likelihood=float(voice_likelihood),
+                            now_monotonic=now_for_diag,
+                        )
                         if barge_in_confirmed and is_playing_out:
                             owner._session_manager.note_user_turn_committed()
                         if drop_chunk:

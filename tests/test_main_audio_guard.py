@@ -12,6 +12,7 @@ from kajovochat.main import (
     run_audio_guard_selftest,
 )
 from kajovochat.audio.voice_gate import should_drop_mic_chunk
+from kajovochat.audio.session_state import SessionState
 from kajovochat.settings import AppSettings, DEFAULT_AUDIO_GUARD_PROFILE
 from kajovochat.audio.devices import build_device_fingerprint, calibrate_audio_devices_advanced
 from kajovochat.audio.windows_system_aec import WindowsSystemAecProbe
@@ -576,6 +577,19 @@ def test_shutdown_runtime_resources_stops_loop_before_clearing_rt() -> None:
     assert events[:2] == ["stop_loop", "close_rt"]
 
 
+def test_conversation_worker_exposes_runtime_loop_wrappers() -> None:
+    worker = ConversationWorker(AppSettings())
+    events: list[tuple[str, float | None]] = []
+
+    worker._rt_runtime_controller.start = lambda: events.append(("start", None))  # type: ignore[method-assign]
+    worker._rt_runtime_controller.stop = lambda timeout_s=1.0: events.append(("stop", float(timeout_s)))  # type: ignore[method-assign]
+
+    worker._start_rt_loop()
+    worker._stop_rt_loop(timeout_s=0.25)
+
+    assert events == [("start", None), ("stop", 0.25)]
+
+
 def test_request_stop_stops_loop_before_clearing_rt() -> None:
     worker = ConversationWorker(AppSettings())
     events: list[str] = []
@@ -592,6 +606,18 @@ def test_request_stop_stops_loop_before_clearing_rt() -> None:
     worker.request_stop()
 
     assert events[:2] == ["stop_loop", "close_rt"]
+
+
+def test_request_stop_resets_session_manager_state_to_idle() -> None:
+    worker = ConversationWorker(AppSettings())
+
+    worker._session_manager.session_state = SessionState.ACTIVE
+    worker._mode = "handsfree"
+
+    worker.request_stop()
+
+    assert worker._session_manager.session_state == SessionState.IDLE
+    assert worker._mode == "idle"
 
 
 def test_backend_aware_metrics_promote_successful_webrtc_block() -> None:

@@ -79,65 +79,113 @@ class RealtimeService:
     def is_connected(self) -> bool:
         return self._connected.is_set() and not self._closed.is_set()
 
-    def connect(self, timeout_s: float = 10.0) -> None:
+    def connect(self, timeout_s: float = 10.0, *, max_attempts: int = 3, retry_delay_s: float = 0.75) -> None:
         if self._ws_thread and self._ws_thread.is_alive():
             return
 
         url = REALTIME_WS_URL.format(model=self.cfg.model)
         headers = ["Authorization: Bearer " + self.cfg.api_key]
-
-        def _on_open(ws):
-            if self.on_status:
-                self.on_status("Realtime: connected")
-            self._connected.set()
-            self._last_close_code = None
-            self._last_close_message = ""
-            # Configure session.
-            self._send_session_update()
-
-        def _on_message(ws, message: str):
-            try:
-                evt = json.loads(message)
-            except Exception:
-                return
-            self.last_event_ts = time.monotonic()
-            self._events.put(evt)
-
-        def _on_error(ws, error):
-            msg = str(error)
-            if self.on_error:
-                self.on_error(msg)
-
-        def _on_close(ws, status_code, close_msg):
-            self._closed.set()
-            self._connected.clear()
-            self._last_close_code = status_code
-            self._last_close_message = str(close_msg or "")
-            if self.on_status:
-                suffix = f" ({status_code})" if status_code is not None else ""
-                self.on_status(f"Realtime: disconnected{suffix}")
-
-        self._ws = websocket.WebSocketApp(
-            url,
-            header=headers,
-            on_open=_on_open,
-            on_message=_on_message,
-            on_error=_on_error,
-            on_close=_on_close,
-        )
-
         self._closed.clear()
         self._connected.clear()
+        last_error = "timeout"
 
-        def run():
-            # Ping helps keep the socket alive on some networks.
-            self._ws.run_forever(ping_interval=20, ping_timeout=10)
+        for attempt in range(1, max(1, int(max_attempts)) + 1):
+            attempt_connected = threading.Event()
+            attempt_failed = threading.Event()
+            attempt_state = {"opened": False, "error": ""}
 
-        self._ws_thread = threading.Thread(target=run, daemon=True)
-        self._ws_thread.start()
+            def _on_open(ws):
+                del ws
+                attempt_state["opened"] = True
+                if self.on_status:
+                    self.on_status("Realtime: connected")
+                self._connected.set()
+                self._last_close_code = None
+                self._last_close_message = ""
+                attempt_connected.set()
+                # Configure session.
+                self._send_session_update()
 
-        if not self._connected.wait(timeout=timeout_s):
-            raise RuntimeError("Failed to connect to Realtime API")
+            def _on_message(ws, message: str):
+                del ws
+                try:
+                    evt = json.loads(message)
+                except Exception:
+                    return
+                self.last_event_ts = time.monotonic()
+                self._events.put(evt)
+
+            def _on_error(ws, error):
+                del ws
+                msg = str(error)
+                if attempt_state["opened"]:
+                    if self.on_error:
+                        self.on_error(msg)
+                    return
+                attempt_state["error"] = msg
+                attempt_failed.set()
+
+            def _on_close(ws, status_code, close_msg):
+                del ws
+                self._last_close_code = status_code
+                self._last_close_message = str(close_msg or "")
+                if attempt_state["opened"]:
+                    self._closed.set()
+                    self._connected.clear()
+                    if self.on_status:
+                        suffix = f" ({status_code})" if status_code is not None else ""
+                        self.on_status(f"Realtime: disconnected{suffix}")
+                    return
+                if not attempt_state["error"] and (status_code is not None or close_msg):
+                    attempt_state["error"] = str(close_msg or f"close_code={status_code}")
+                attempt_failed.set()
+
+            ws = websocket.WebSocketApp(
+                url,
+                header=headers,
+                on_open=_on_open,
+                on_message=_on_message,
+                on_error=_on_error,
+                on_close=_on_close,
+            )
+            self._ws = ws
+
+            def run() -> None:
+                # Ping helps keep the socket alive on some networks.
+                ws.run_forever(ping_interval=20, ping_timeout=10)
+
+            ws_thread = threading.Thread(target=run, daemon=True)
+            self._ws_thread = ws_thread
+            ws_thread.start()
+
+            deadline = time.monotonic() + float(timeout_s)
+            while time.monotonic() < deadline:
+                if attempt_connected.wait(timeout=0.05):
+                    self._closed.clear()
+                    return
+                if attempt_failed.is_set():
+                    break
+
+            if attempt_state["error"]:
+                last_error = attempt_state["error"]
+            try:
+                ws.close()
+            except Exception:
+                pass
+            try:
+                if ws_thread.is_alive():
+                    ws_thread.join(timeout=1.5)
+            except Exception:
+                pass
+            self._ws = None
+            self._ws_thread = None
+            self._connected.clear()
+
+            if attempt >= max_attempts:
+                break
+            time.sleep(max(0.0, float(retry_delay_s)) * attempt)
+
+        raise RuntimeError(f"Failed to connect to Realtime API: {last_error}")
 
     def close(self) -> None:
         self._closed.set()

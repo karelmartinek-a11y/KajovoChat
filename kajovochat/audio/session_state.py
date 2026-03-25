@@ -28,7 +28,7 @@ class SessionTransitionError(RuntimeError):
 _ALLOWED_TRANSITIONS: dict[SessionState, set[SessionState]] = {
     SessionState.IDLE: {SessionState.STARTING, SessionState.FAILED},
     SessionState.STARTING: {SessionState.PROBING, SessionState.FAILED},
-    SessionState.PROBING: {SessionState.ACTIVE, SessionState.DEGRADED, SessionState.FAILED},
+    SessionState.PROBING: {SessionState.ACTIVE, SessionState.DEGRADED, SessionState.RECOVERING, SessionState.FAILED},
     SessionState.ACTIVE: {SessionState.RECOVERING, SessionState.STOPPING, SessionState.FAILED},
     SessionState.DEGRADED: {SessionState.RECOVERING, SessionState.STOPPING, SessionState.FAILED},
     SessionState.RECOVERING: {SessionState.ACTIVE, SessionState.DEGRADED, SessionState.STOPPING, SessionState.FAILED},

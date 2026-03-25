@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import base64
+import threading
+
+import pytest
 
 from kajovochat.services.realtime_service import RealtimeConfig, RealtimeService
 
@@ -42,3 +45,112 @@ def test_realtime_service_parses_callbacks() -> None:
     assert seen["assistant"] == "Nazdar"
     assert seen["audio"] == b"\x01\x02"
     assert seen["response_done"] is True
+
+
+class _ImmediateThread:
+    def __init__(self, *, target, daemon: bool = False) -> None:
+        self._target = target
+        self.daemon = daemon
+        self._alive = False
+
+    def start(self) -> None:
+        self._alive = True
+        try:
+            self._target()
+        finally:
+            self._alive = False
+
+    def is_alive(self) -> bool:
+        return self._alive
+
+    def join(self, timeout: float | None = None) -> None:
+        del timeout
+
+
+def test_realtime_service_retries_transient_handshake_failure_before_connecting(monkeypatch) -> None:
+    attempts = iter(("fail", "open"))
+
+    class _FakeWebSocketApp:
+        def __init__(self, url, header, on_open, on_message, on_error, on_close) -> None:
+            del url, header, on_message
+            self._mode = next(attempts)
+            self._on_open = on_open
+            self._on_error = on_error
+            self._on_close = on_close
+
+        def run_forever(self, ping_interval=20, ping_timeout=10) -> None:
+            del ping_interval, ping_timeout
+            if self._mode == "fail":
+                self._on_error(self, RuntimeError("Handshake status 504 Gateway Time-out"))
+                self._on_close(self, None, "Handshake status 504 Gateway Time-out")
+                return
+            self._on_open(self)
+
+        def send(self, data: str) -> None:
+            del data
+
+        def close(self) -> None:
+            return
+
+    service = RealtimeService(
+        RealtimeConfig(
+            api_key="sk-test-123",
+            model="gpt-realtime",
+            instructions="Test",
+            voice="alloy",
+        )
+    )
+    errors: list[str] = []
+    statuses: list[str] = []
+    service.on_error = errors.append
+    service.on_status = statuses.append
+
+    monkeypatch.setattr("kajovochat.services.realtime_service.websocket.WebSocketApp", _FakeWebSocketApp)
+    monkeypatch.setattr(
+        "kajovochat.services.realtime_service.threading.Thread",
+        lambda target, daemon=True: _ImmediateThread(target=target, daemon=daemon),
+    )
+
+    service.connect(timeout_s=0.05, max_attempts=2, retry_delay_s=0.0)
+
+    assert service.is_connected is True
+    assert errors == []
+    assert statuses.count("Realtime: connected") == 1
+
+
+def test_realtime_service_raises_last_handshake_error_after_retry_exhaustion(monkeypatch) -> None:
+    class _FakeWebSocketApp:
+        def __init__(self, url, header, on_open, on_message, on_error, on_close) -> None:
+            del url, header, on_open, on_message
+            self._on_error = on_error
+            self._on_close = on_close
+
+        def run_forever(self, ping_interval=20, ping_timeout=10) -> None:
+            del ping_interval, ping_timeout
+            self._on_error(self, RuntimeError("Handshake status 504 Gateway Time-out"))
+            self._on_close(self, None, "Handshake status 504 Gateway Time-out")
+
+        def send(self, data: str) -> None:
+            del data
+
+        def close(self) -> None:
+            return
+
+    service = RealtimeService(
+        RealtimeConfig(
+            api_key="sk-test-123",
+            model="gpt-realtime",
+            instructions="Test",
+            voice="alloy",
+        )
+    )
+    service.on_error = lambda message: (_ for _ in ()).throw(AssertionError(f"Nemá se volat runtime on_error: {message}"))
+
+    monkeypatch.setattr("kajovochat.services.realtime_service.websocket.WebSocketApp", _FakeWebSocketApp)
+    monkeypatch.setattr(
+        "kajovochat.services.realtime_service.threading.Thread",
+        lambda target, daemon=True: _ImmediateThread(target=target, daemon=daemon),
+    )
+
+    with pytest.raises(RuntimeError, match="504 Gateway Time-out"):
+        service.connect(timeout_s=0.05, max_attempts=2, retry_delay_s=0.0)
