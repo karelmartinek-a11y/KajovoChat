@@ -25,9 +25,6 @@ class ConversationAudioPolicy:
         self._latency = ConversationAudioLatencyState(
             last_committed=int(owner._guard_calibration.get("latency_samples", 0) or 0)
         )
-        self._live_miss_streak = 0
-        self._live_echo_streak = 0
-        self._last_live_tune_at = 0.0
 
     def current_device_fingerprint(self) -> str:
         owner = self._owner
@@ -182,118 +179,6 @@ class ConversationAudioPolicy:
             owner._guard_profile = merged
         self.configure_aec_from_calibration()
         self.apply_aec_mode_policy()
-
-    def consider_live_tuning(
-        self,
-        *,
-        now_monotonic: float,
-        raw_input_level: float,
-        post_gate_input_level: float,
-        output_level: float,
-        top_reason: str,
-        monitor_state: str,
-        samples: int,
-        playback_ratio: float,
-        avg_voice_likelihood: float,
-    ) -> bool:
-        """Jemně upraví guard za běhu podle toho, co skutečně prošlo přes gate."""
-        owner = self._owner
-        if now_monotonic - self._last_live_tune_at < 0.95:
-            return False
-
-        raw_input_level = float(raw_input_level)
-        post_gate_input_level = float(post_gate_input_level)
-        output_level = float(output_level)
-        playback_ratio = float(playback_ratio)
-        avg_voice_likelihood = float(avg_voice_likelihood)
-        top_reason = str(top_reason or "").strip().lower()
-        monitor_state = str(monitor_state or "").strip().lower()
-
-        user_like_signal = bool(raw_input_level >= 0.02 and raw_input_level >= post_gate_input_level + 0.006)
-        stale_playback_lock = bool(
-            top_reason in {"playback_voice_echo", "playback_voice_lock"}
-            and output_level <= 0.015
-            and raw_input_level >= 0.02
-            and avg_voice_likelihood >= 0.42
-        )
-        blocked_user_signal = bool(
-            user_like_signal
-            and post_gate_input_level <= 0.004
-            and output_level <= 0.02
-        )
-        sustained_echo = bool(
-            top_reason in {"playback_voice_echo", "playback_voice_lock"}
-            and playback_ratio >= 0.52
-            and avg_voice_likelihood >= 0.42
-            and output_level >= 0.03
-            and raw_input_level < 0.024
-        )
-
-        if blocked_user_signal or stale_playback_lock:
-            self._live_miss_streak = min(12, self._live_miss_streak + 1)
-        else:
-            self._live_miss_streak = max(0, self._live_miss_streak - 1)
-
-        if sustained_echo:
-            self._live_echo_streak = min(12, self._live_echo_streak + 1)
-        else:
-            self._live_echo_streak = max(0, self._live_echo_streak - 1)
-
-        should_relax = self._live_miss_streak >= 2
-        should_tighten = self._live_echo_streak >= 6 and self._live_miss_streak == 0
-        if not should_relax and not should_tighten:
-            return False
-
-        profile = dict(owner._guard_profile)
-        before = dict(profile)
-        reason = "missing_user_capture" if should_relax else "sustained_echo"
-
-        if should_relax:
-            profile["playback_activity_level"] = max(0.02, float(profile["playback_activity_level"]) - 0.0025)
-            profile["echo_similarity_soft"] = min(0.84, float(profile["echo_similarity_soft"]) + 0.01)
-            profile["echo_similarity_drop"] = min(0.98, max(float(profile["echo_similarity_soft"]) + 0.04, float(profile["echo_similarity_drop"]) + 0.012))
-            profile["barge_in_min_input_level"] = max(0.035, float(profile["barge_in_min_input_level"]) - 0.002)
-            profile["barge_in_output_ratio"] = max(1.08, float(profile["barge_in_output_ratio"]) - 0.01)
-            profile["server_vad_threshold"] = max(0.66, float(profile["server_vad_threshold"]) - 0.004)
-            owner._echo_trailing_hold_s = max(0.08, float(getattr(owner, "_echo_trailing_hold_s", 0.18)) - 0.02)
-            owner._guard_learning_until = max(float(owner._guard_learning_until), now_monotonic + 30.0)
-        else:
-            profile["playback_activity_level"] = min(0.16, float(profile["playback_activity_level"]) + 0.0015)
-            profile["echo_similarity_soft"] = max(0.54, float(profile["echo_similarity_soft"]) - 0.006)
-            profile["echo_similarity_drop"] = max(float(profile["echo_similarity_soft"]) + 0.04, float(profile["echo_similarity_drop"]) - 0.008)
-            profile["barge_in_min_input_level"] = min(0.22, float(profile["barge_in_min_input_level"]) + 0.001)
-            profile["barge_in_output_ratio"] = min(1.9, float(profile["barge_in_output_ratio"]) + 0.006)
-            owner._echo_trailing_hold_s = min(0.28, float(getattr(owner, "_echo_trailing_hold_s", 0.18)) + 0.01)
-
-        owner._guard_profile = profile
-        self._last_live_tune_at = float(now_monotonic)
-        if hasattr(owner, "_log_event"):
-            changed_profile = {
-                key: {
-                    "before": round(float(before.get(key, 0.0) or 0.0), 5),
-                    "after": round(float(profile.get(key, 0.0) or 0.0), 5),
-                }
-                for key in sorted(profile)
-                if abs(float(profile.get(key, 0.0) or 0.0) - float(before.get(key, 0.0) or 0.0)) >= 0.0005
-            }
-            owner._log_event(
-                "guard_live_tuned",
-                reason=reason,
-                monitor_state=monitor_state,
-                top_reason=top_reason,
-                raw_input_level=round(raw_input_level, 5),
-                post_gate_input_level=round(post_gate_input_level, 5),
-                output_level=round(output_level, 5),
-                playback_ratio=round(playback_ratio, 5),
-                voice_likelihood=round(avg_voice_likelihood, 5),
-                samples=int(samples),
-                miss_streak=int(self._live_miss_streak),
-                echo_streak=int(self._live_echo_streak),
-                echo_trailing_hold_s=round(float(getattr(owner, "_echo_trailing_hold_s", 0.18)), 3),
-                profile=profile,
-                changed_profile=changed_profile,
-            )
-        return True
 
     def resolve_audio_devices(self) -> None:
         """Vybere stabilní vstup/výstup a odvodí audio topologii relace."""

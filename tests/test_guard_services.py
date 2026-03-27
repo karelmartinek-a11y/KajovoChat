@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import math
 import tempfile
-import time
 from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
 
-from kajovochat.audio.runtime_bindings import ConversationAudioRuntimeBindings
-from kajovochat.audio.session_policy import ConversationAudioPolicy
 from kajovochat.services.guard_adaptation import GuardAdaptor
 from kajovochat.services.guard_replay import append_guard_replay_metrics
 from kajovochat.services.guard_telemetry import GuardTelemetry
@@ -72,23 +69,6 @@ def test_guard_adaptor_tightens_echo_thresholds_under_heavy_echo() -> None:
     assert result.profile["echo_similarity_drop"] > DEFAULT_AUDIO_GUARD_PROFILE["echo_similarity_drop"]
 
 
-def test_guard_adaptor_prefers_barge_ready_when_voice_is_still_strong() -> None:
-    adaptor = GuardAdaptor()
-    result = adaptor.adapt(
-        dict(DEFAULT_AUDIO_GUARD_PROFILE),
-        {
-            "drop_rate": 0.47,
-            "avg_similarity": 0.29,
-            "avg_voice_likelihood": 0.56,
-            "playback_ratio": 0.71,
-            "barge_in_ratio": 0.26,
-        },
-    )
-
-    assert result.state == "barge_ready"
-    assert result.profile["barge_in_min_input_level"] <= DEFAULT_AUDIO_GUARD_PROFILE["barge_in_min_input_level"]
-
-
 def test_guard_adaptor_relaxes_barge_in_when_voice_is_present() -> None:
     adaptor = GuardAdaptor()
     result = adaptor.adapt(
@@ -123,126 +103,6 @@ def test_guard_adaptor_supports_aec_aware_mode() -> None:
 
     assert result.state == "aec_aware"
     assert result.profile["barge_in_output_ratio"] > DEFAULT_AUDIO_GUARD_PROFILE["barge_in_output_ratio"]
-
-
-def test_runtime_bindings_extend_learning_window_for_echo_heavy_session() -> None:
-    class _Telemetry:
-        def snapshot(self, window_s: float = 15.0) -> dict[str, float | str]:
-            return {
-                "samples": 24,
-                "drop_rate": 0.21,
-                "avg_similarity": 0.31,
-                "avg_voice_likelihood": 0.49,
-                "playback_ratio": 0.58,
-                "barge_in_ratio": 0.02,
-                "avg_output": 0.09,
-                "top_reason": "playback_voice_echo",
-            }
-
-    events: list[tuple[str, dict[str, object]]] = []
-    owner = SimpleNamespace(
-        _guard_last_adapt_at=0.0,
-        _guard_telemetry=_Telemetry(),
-        _guard_aec_aware=False,
-        _guard_adaptor=GuardAdaptor(),
-        _guard_profile=dict(DEFAULT_AUDIO_GUARD_PROFILE),
-        _guard_learning_until=time.monotonic() - 1.0,
-        _emit_guard_debug=lambda: None,
-        _log_event=lambda record_type, **extra: events.append((record_type, extra)),
-    )
-    bindings = ConversationAudioRuntimeBindings(
-        owner,
-        closed_pose_factory=lambda: {},
-        state_speaking="speaking",
-        echo_trailing_hold_s=0.28,
-    )
-
-    before = time.monotonic()
-    bindings.adapt_guard_if_needed()
-
-    assert owner._guard_learning_until >= before + 80.0
-    assert any(record_type == "guard_learning_extended" for record_type, _payload in events)
-    assert any(record_type == "guard_adaptation" for record_type, _payload in events)
-
-
-def test_live_audio_policy_relaxes_when_raw_voice_is_repeatedly_blocked() -> None:
-    events: list[tuple[str, dict[str, object]]] = []
-    owner = SimpleNamespace(
-        _guard_profile=dict(DEFAULT_AUDIO_GUARD_PROFILE),
-        _guard_calibration={"latency_samples": 0},
-        _guard_learning_until=0.0,
-        _echo_trailing_hold_s=0.18,
-        _log_event=lambda record_type, **extra: events.append((record_type, extra)),
-    )
-    policy = ConversationAudioPolicy(owner)
-
-    before_profile = dict(owner._guard_profile)
-    assert policy.consider_live_tuning(
-        now_monotonic=1.0,
-        raw_input_level=0.05,
-        post_gate_input_level=0.0,
-        output_level=0.0,
-        top_reason="playback_voice_echo",
-        monitor_state="stable",
-        samples=64,
-        playback_ratio=0.62,
-        avg_voice_likelihood=0.48,
-    ) is False
-    assert policy.consider_live_tuning(
-        now_monotonic=2.1,
-        raw_input_level=0.05,
-        post_gate_input_level=0.0,
-        output_level=0.0,
-        top_reason="playback_voice_echo",
-        monitor_state="stable",
-        samples=64,
-        playback_ratio=0.62,
-        avg_voice_likelihood=0.48,
-    ) is True
-
-    assert owner._guard_profile["echo_similarity_soft"] > before_profile["echo_similarity_soft"]
-    assert owner._guard_profile["barge_in_min_input_level"] < before_profile["barge_in_min_input_level"]
-    assert owner._echo_trailing_hold_s < 0.18
-    assert any(record_type == "guard_live_tuned" for record_type, _payload in events)
-
-
-def test_live_audio_policy_relaxes_when_playback_lock_lingers_after_output_drops() -> None:
-    events: list[tuple[str, dict[str, object]]] = []
-    owner = SimpleNamespace(
-        _guard_profile=dict(DEFAULT_AUDIO_GUARD_PROFILE),
-        _guard_calibration={"latency_samples": 0},
-        _guard_learning_until=0.0,
-        _echo_trailing_hold_s=0.18,
-        _log_event=lambda record_type, **extra: events.append((record_type, extra)),
-    )
-    policy = ConversationAudioPolicy(owner)
-
-    assert policy.consider_live_tuning(
-        now_monotonic=10.0,
-        raw_input_level=0.0847,
-        post_gate_input_level=0.0847,
-        output_level=0.0,
-        top_reason="playback_voice_lock",
-        monitor_state="stable",
-        samples=167,
-        playback_ratio=0.19,
-        avg_voice_likelihood=0.53,
-    ) is False
-    assert policy.consider_live_tuning(
-        now_monotonic=11.2,
-        raw_input_level=0.0847,
-        post_gate_input_level=0.0847,
-        output_level=0.0,
-        top_reason="playback_voice_lock",
-        monitor_state="stable",
-        samples=167,
-        playback_ratio=0.19,
-        avg_voice_likelihood=0.53,
-    ) is True
-
-    assert owner._guard_profile["barge_in_min_input_level"] < DEFAULT_AUDIO_GUARD_PROFILE["barge_in_min_input_level"]
-    assert owner._echo_trailing_hold_s < 0.18
-    assert any(record_type == "guard_live_tuned" for record_type, _payload in events)
 
 
 def test_guard_replay_metrics_append_jsonl() -> None:

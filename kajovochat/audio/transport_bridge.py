@@ -22,13 +22,13 @@ class RealtimeTransportBridge:
         assistant_audio_sink: Callable[[bytes], None],
         speech_started_sink: Callable[[], None],
         speech_stopped_sink: Callable[[], None],
-        response_created_sink: Callable[[str], None],
         response_done_sink: Callable[[], None],
         activity_sink: Callable[[], None],
-        event_log_sink: Callable[[str, dict[str, object]], None],
+        audio_mode_supplier: Callable[[], str],
         model: str,
         voice: str,
         noise_reduction: str,
+        semantic_vad_eagerness: str,
         tts_speed: float,
         server_vad_silence_ms: int,
         server_vad_prefix_ms: int,
@@ -46,19 +46,28 @@ class RealtimeTransportBridge:
         self._assistant_audio_sink = assistant_audio_sink
         self._speech_started_sink = speech_started_sink
         self._speech_stopped_sink = speech_stopped_sink
-        self._response_created_sink = response_created_sink
         self._response_done_sink = response_done_sink
         self._activity_sink = activity_sink
-        self._event_log_sink = event_log_sink
+        self._audio_mode_supplier = audio_mode_supplier
         self.model = model
         self.voice = voice
         self.noise_reduction = noise_reduction
+        self.semantic_vad_eagerness = semantic_vad_eagerness
         self.tts_speed = tts_speed
         self.server_vad_silence_ms = server_vad_silence_ms
         self.server_vad_prefix_ms = server_vad_prefix_ms
         self.server_vad_threshold = server_vad_threshold
         self.realtime: Optional[RealtimeService] = None
-        self.turn_mode: str = "server_vad"
+        self.turn_mode: str = "semantic_vad"
+
+    def _resolve_noise_reduction(self) -> str | None:
+        audio_mode = getattr(self, "_audio_mode_supplier", lambda: "notebook_builtin")()
+        if audio_mode in {"wired_headset", "bluetooth_headset", "external_headphones"}:
+            return "near_field"
+        if audio_mode in {"notebook_builtin", "external_speakers"}:
+            return "far_field"
+        value = (self.noise_reduction or "").strip()
+        return value or None
 
     def ensure_connected(self, turn_mode: str, reconnect_attempts: int = 0) -> RealtimeService:
         if not self.settings.openai_api_key:
@@ -73,7 +82,8 @@ class RealtimeTransportBridge:
             language_hint="auto",
             turn_mode=turn_mode,
             auto_interrupt=True,
-            noise_reduction=self.noise_reduction,
+            noise_reduction=self._resolve_noise_reduction(),
+            semantic_vad_eagerness=self.semantic_vad_eagerness,
             output_speed=self.tts_speed,
             server_vad_silence_ms=self.server_vad_silence_ms,
             server_vad_prefix_ms=self.server_vad_prefix_ms,
@@ -85,7 +95,8 @@ class RealtimeTransportBridge:
             self.realtime.connect()
             self._activity_sink()
             return self.realtime
-        self.realtime.cfg.noise_reduction = self.noise_reduction
+        self.realtime.cfg.noise_reduction = self._resolve_noise_reduction()
+        self.realtime.cfg.semantic_vad_eagerness = self.semantic_vad_eagerness
         self.realtime.cfg.output_speed = self.tts_speed
         self.realtime.cfg.server_vad_silence_ms = self.server_vad_silence_ms
         self.realtime.cfg.server_vad_prefix_ms = self.server_vad_prefix_ms
@@ -153,38 +164,6 @@ class RealtimeTransportBridge:
             self._activity_sink()
             self._response_done_sink()
 
-        def _event(evt: dict) -> None:
-            etype = str(evt.get("type") or "").strip()
-            if not etype:
-                return
-            if etype in {"response.output_audio.delta", "response.audio.delta", "response.output_audio_transcript.delta"}:
-                return
-            payload: dict[str, object] = {"event_type": etype}
-            transcript = evt.get("transcript")
-            if isinstance(transcript, str) and transcript:
-                payload["transcript_chars"] = len(transcript)
-            delta = evt.get("delta")
-            if isinstance(delta, str) and etype not in {"session.created", "session.updated"}:
-                payload["delta_chars"] = len(delta)
-            item_id = evt.get("item_id")
-            if isinstance(item_id, str) and item_id:
-                payload["item_id"] = item_id
-            response = evt.get("response")
-            response_id = ""
-            if isinstance(response, dict):
-                response_id = str(response.get("id") or "").strip()
-                if isinstance(response_id, str) and response_id:
-                    payload["response_id"] = response_id
-            error = evt.get("error")
-            if isinstance(error, dict):
-                message = error.get("message")
-                if isinstance(message, str) and message:
-                    payload["message"] = message
-            if etype == "response.created" and response_id:
-                self._activity_sink()
-                self._response_created_sink(response_id)
-            self._event_log_sink("realtime_server_event", payload)
-
         rt.on_status = _status
         rt.on_error = _error
         rt.on_user_transcript = _user_transcript
@@ -194,4 +173,3 @@ class RealtimeTransportBridge:
         rt.on_vad_speech_started = _speech_started
         rt.on_vad_speech_stopped = _speech_stopped
         rt.on_response_done = _response_done
-        rt.on_event = _event

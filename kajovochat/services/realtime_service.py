@@ -21,12 +21,18 @@ class RealtimeConfig:
     instructions: str
     voice: str
     language_hint: str = "auto"  # ISO-639-1 or "auto"
-    turn_mode: str = "server_vad"  # "server_vad" or "ptt"
+    turn_mode: str = "semantic_vad"  # "semantic_vad", "server_vad" or "ptt"
     auto_interrupt: bool = True
+
+    # Input transcription model for user captions / logs.
+    transcription_model: str = "gpt-4o-transcribe"
 
     # Hands-free quality / robustness knobs (server-side)
     # `noise_reduction`: "near_field" for headsets, "far_field" for laptop mics.
     noise_reduction: Optional[str] = "far_field"
+
+    # Semantic VAD: prefer letting the user finish naturally before the model jumps in.
+    semantic_vad_eagerness: str = "low"
 
     # Output speech speed (0.25–1.5 per API docs). This is post-processed after generation.
     output_speed: float = 1.0
@@ -71,20 +77,16 @@ class RealtimeService:
         self.on_vad_speech_started: Optional[Callable[[], None]] = None
         self.on_vad_speech_stopped: Optional[Callable[[], None]] = None
         self.on_response_done: Optional[Callable[[], None]] = None
-        self.on_event: Optional[Callable[[dict], None]] = None
 
         self._assistant_text_buf = ""
         self.last_event_ts = time.monotonic()
 
-    @staticmethod
-    def _is_nonfatal_server_error(message: str) -> bool:
-        """Urci, kdy je serverova chyba bezpecna k ignorovani."""
-        lowered = (message or "").lower()
-        if "buffer too small" in lowered:
-            return True
-        if "active response in progress" in lowered:
-            return True
-        return False
+        # Best-effort tracking of the currently playing assistant audio item.
+        # This lets the desktop client keep the server-side conversation aligned
+        # with what the user actually heard before a barge-in interrupted output.
+        self._active_output_item_id: Optional[str] = None
+        self._active_output_content_index: int = 0
+        self._active_output_pcm_bytes: int = 0
 
     @property
     def is_connected(self) -> bool:
@@ -233,6 +235,16 @@ class RealtimeService:
         turn_detection: Any
         if self.cfg.turn_mode == "ptt":
             turn_detection = None
+        elif self.cfg.turn_mode == "semantic_vad":
+            eagerness = str(self.cfg.semantic_vad_eagerness or "auto").strip().lower()
+            if eagerness not in {"low", "medium", "high", "auto"}:
+                eagerness = "auto"
+            turn_detection = {
+                "type": "semantic_vad",
+                "eagerness": eagerness,
+                "create_response": True,
+                "interrupt_response": bool(self.cfg.auto_interrupt),
+            }
         else:
             td: dict[str, Any] = {
                 "type": "server_vad",
@@ -249,11 +261,12 @@ class RealtimeService:
                 td["idle_timeout_ms"] = int(self.cfg.server_vad_idle_timeout_ms)
             turn_detection = td
 
+        transcription_model = (self.cfg.transcription_model or "gpt-4o-transcribe").strip()
         transcription: Any
         if self.cfg.language_hint and self.cfg.language_hint != "auto":
-            transcription = {"model": "whisper-1", "language": self.cfg.language_hint}
+            transcription = {"model": transcription_model, "language": self.cfg.language_hint}
         else:
-            transcription = {"model": "whisper-1"}
+            transcription = {"model": transcription_model}
 
         evt = {
             "type": "session.update",
@@ -317,11 +330,11 @@ class RealtimeService:
 
     # ---- Audio input ----
 
-    def append_audio_pcm16(self, pcm16_bytes: bytes) -> bool:
+    def append_audio_pcm16(self, pcm16_bytes: bytes) -> None:
         if not pcm16_bytes:
-            return False
+            return
         b64 = base64.b64encode(pcm16_bytes).decode("ascii")
-        return self._send({"type": "input_audio_buffer.append", "audio": b64})
+        self._send({"type": "input_audio_buffer.append", "audio": b64})
 
     def clear_input_audio(self) -> None:
         self._send({"type": "input_audio_buffer.clear"})
@@ -334,6 +347,38 @@ class RealtimeService:
 
     def cancel_response(self) -> None:
         self._send({"type": "response.cancel"})
+
+    def truncate_current_response(self, *, buffered_audio_bytes: int) -> bool:
+        """Best-effort sync of assistant context after local playback interruption.
+
+        `conversation.item.truncate` expects the portion of assistant audio the
+        user actually heard. We approximate that using the amount of current
+        response PCM already received minus the audio still buffered locally.
+        """
+        item_id = self._active_output_item_id
+        if not item_id or self._active_output_pcm_bytes <= 0:
+            return False
+        played_audio_bytes = max(0, int(self._active_output_pcm_bytes) - max(0, int(buffered_audio_bytes)))
+        if played_audio_bytes <= 0:
+            return False
+        played_samples = played_audio_bytes // 2  # mono PCM16 @ 24 kHz
+        audio_end_ms = max(1, int(round((played_samples / 24000.0) * 1000.0)))
+        sent = self._send(
+            {
+                "type": "conversation.item.truncate",
+                "item_id": item_id,
+                "content_index": int(self._active_output_content_index),
+                "audio_end_ms": audio_end_ms,
+            }
+        )
+        if sent:
+            self._reset_active_output_tracking()
+        return bool(sent)
+
+    def _reset_active_output_tracking(self) -> None:
+        self._active_output_item_id = None
+        self._active_output_content_index = 0
+        self._active_output_pcm_bytes = 0
 
     # ---- Incoming event pump ----
 
@@ -353,15 +398,10 @@ class RealtimeService:
         if not etype:
             return
         self.last_event_ts = time.monotonic()
-        if self.on_event:
-            try:
-                self.on_event(evt)
-            except Exception:
-                pass
 
         if etype == "error":
             msg = evt.get("error", {}).get("message") or json.dumps(evt, ensure_ascii=False)
-            if self.on_error and not self._is_nonfatal_server_error(msg):
+            if self.on_error:
                 self.on_error(msg)
             return
 
@@ -410,12 +450,24 @@ class RealtimeService:
                 pcm = base64.b64decode(b64)
             except Exception:
                 return
+            item_id = evt.get("item_id") or evt.get("output_item_id") or self._active_output_item_id
+            if item_id:
+                self._active_output_item_id = str(item_id)
+            try:
+                self._active_output_content_index = int(evt.get("content_index", self._active_output_content_index) or 0)
+            except Exception:
+                self._active_output_content_index = 0
+            self._active_output_pcm_bytes += len(pcm)
             if self.on_assistant_audio_delta:
                 self.on_assistant_audio_delta(pcm)
             return
 
+        if etype in {"response.output_audio.done", "response.audio.done"}:
+            return
+
         # Ignore everything else by default.
         if etype == "response.done":
+            self._reset_active_output_tracking()
             if self.on_response_done:
                 self.on_response_done()
             return

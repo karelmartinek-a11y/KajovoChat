@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ class FakeMic:
         self.started = False
         self.stopped = False
         self.pending_chunk_count = 0
+        self._captured_samples = 0
+        self._last_capture_mono_ns = 0
 
     def start(self) -> None:
         self.started = True
@@ -65,11 +68,20 @@ class FakeDuplex:
     def start_mic(self) -> None:
         self.started = True
         self.mic.start()
+        self.mic.pending_chunk_count = 1
+        self.mic._captured_samples = max(int(self.blocksize), 1)
+        self.mic._last_capture_mono_ns = time.monotonic_ns()
 
     def get_runtime_state(self) -> dict[str, int]:
+        capture_age_ms = -1
+        last_capture_ns = int(getattr(self.mic, "_last_capture_mono_ns", 0) or 0)
+        if last_capture_ns > 0:
+            capture_age_ms = int((time.monotonic_ns() - last_capture_ns) / 1_000_000)
         return {
             "pending_chunk_count": int(self.mic.pending_chunk_count),
             "buffered_bytes": int(self.player.buffered_bytes),
+            "captured_samples": int(getattr(self.mic, "_captured_samples", 0) or 0),
+            "capture_age_ms": capture_age_ms,
         }
 
     def stop(self) -> None:
@@ -161,8 +173,10 @@ class AudioArchitectureHarness:
         }
         self.runtime_resources = AudioRuntimeResources()
         self.transport = FakeTransport()
+        settings = AppSettings(audio_aec_mode=aec_mode)
+        settings.openai_api_key = "test-key"
         self.manager = AudioSessionManager(
-            settings=AppSettings(audio_aec_mode=aec_mode),
+            settings=settings,
             mode_supplier=lambda: str(self.state["mode"]),
             mode_setter=lambda value: self.state.__setitem__("mode", value),
             state_sink=lambda value: self.state["ui_states"].append(value),
@@ -185,7 +199,6 @@ class AudioArchitectureHarness:
             assistant_audio_sink=lambda value: None,
             speech_started_sink=lambda: None,
             speech_stopped_sink=lambda: None,
-            response_created_sink=lambda response_id: None,
             response_done_sink=lambda: None,
             log_sink=self._log_event,
             aec_mode_setter=lambda value: self.state.__setitem__("aec_mode", value),
@@ -194,6 +207,7 @@ class AudioArchitectureHarness:
             model="gpt-realtime",
             voice="alloy",
             noise_reduction="far_field",
+            semantic_vad_eagerness="low",
             tts_speed=1.0,
             server_vad_silence_ms=900,
             server_vad_prefix_ms=300,
@@ -229,7 +243,7 @@ class AudioArchitectureHarness:
         return ScenarioResult(
             scenario=scenario,
             kind=kind,
-            backend_chain=list(snap.get("recovery_story", [])[-1].get("target_backend", "") for _ in []),
+            backend_chain=_extract_backend_chain(self.state["logs"]),
             final_state=self.manager.session_state.value,
             verdict="PASS" if self.state["errors"] == [] else "FAIL",
             telemetry_snapshot=snap,

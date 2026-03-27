@@ -6,7 +6,7 @@ from kajovochat.audio.telemetry import AudioTelemetry
 
 class _Transport:
     def __init__(self) -> None:
-        self.turn_mode = "server_vad"
+        self.turn_mode = "semantic_vad"
         self.realtime = None
         self.closed = 0
 
@@ -79,6 +79,6 @@ def test_recovery_supervisor_reconnect_policy_stays_transport_only() -> None:
 
     assert flags["fallbacks"] == 0
     assert flags["restores"] == 1
-    assert transport.turn_mode == "server_vad"
+    assert transport.turn_mode == "semantic_vad"
     assert any(record_type == "reconnect_scheduled" for record_type, _payload in logs)
     assert any(record_type == "reconnect_ok" for record_type, _payload in logs)

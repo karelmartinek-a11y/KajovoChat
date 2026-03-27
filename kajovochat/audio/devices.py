@@ -391,25 +391,9 @@ def calibrate_audio_devices_advanced(
         "barge_in_min_input_level": float(max(item.recommended_profile["barge_in_min_input_level"] for item in results)),
         "barge_in_output_ratio": float(max(item.recommended_profile["barge_in_output_ratio"] for item in results)),
     }
-    positive_latencies = [int(getattr(item, "latency_samples", 0) or 0) for item in results if int(getattr(item, "latency_samples", 0) or 0) > 0]
-    if positive_latencies:
-        latency_samples = int(round(float(np.median(positive_latencies))))
-    else:
-        best_alignment = max(
-            results,
-            key=lambda item: (
-                float(getattr(item, "similarity", 0.0) or 0.0),
-                float(getattr(item, "bleed_ratio", 0.0) or 0.0),
-                float(getattr(item, "playback_rms", 0.0) or 0.0),
-            ),
-        )
-        candidate_latency = int(getattr(best_alignment, "latency_samples", 0) or 0)
-        latency_samples = candidate_latency if candidate_latency > 0 and float(getattr(best_alignment, "similarity", 0.0) or 0.0) >= 0.18 else 0
+    latency_samples = int(round(float(np.median([getattr(item, "latency_samples", 0) for item in results]))))
     preferred_frame_size = int(round(float(np.median([getattr(item, "preferred_frame_size", 480) for item in results]))))
-    if latency_samples > 0:
-        filter_length = int(np.clip(256 + max(0, latency_samples) * 2, 256, 2048))
-    else:
-        filter_length = int(round(float(np.median([getattr(item, "filter_length", 256) for item in results]))))
+    filter_length = int(round(float(np.median([getattr(item, "filter_length", 256) for item in results]))))
     mode_counts: dict[str, int] = {}
     for item in results:
         mode = getattr(item, "audio_mode", "notebook_builtin")
@@ -444,3 +428,4 @@ def calibrate_audio_devices_advanced(
         device_fingerprint=device_fingerprint,
         audio_mode=audio_mode,
     )
+

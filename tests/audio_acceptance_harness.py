@@ -25,6 +25,8 @@ class DummyMic:
         self.pending_chunk_count = 0
         self.started = False
         self.stopped = False
+        self._captured_samples = 0
+        self._last_capture_mono_ns = 0
 
     def start(self) -> None:
         self.started = True
@@ -64,11 +66,21 @@ class DummyDuplex:
         self.runtime_state = {
             "pending_chunk_count": 0,
             "buffered_bytes": 0,
+            "captured_samples": 0,
+            "capture_age_ms": -1,
         }
 
     def start_mic(self) -> None:
         self.mic_started = True
         self.mic.start()
+        self.mic.pending_chunk_count = 1
+        self.mic._captured_samples = max(int(self.blocksize), 1)
+        self.mic._last_capture_mono_ns = time.monotonic_ns()
+        self.runtime_state.update(
+            pending_chunk_count=1,
+            captured_samples=int(self.mic._captured_samples),
+            capture_age_ms=0,
+        )
 
     def stop(self) -> None:
         self.stopped = True
@@ -76,7 +88,13 @@ class DummyDuplex:
         self.player.stop()
 
     def get_runtime_state(self) -> dict[str, int]:
-        return dict(self.runtime_state)
+        snapshot = dict(self.runtime_state)
+        last_capture_ns = int(getattr(self.mic, "_last_capture_mono_ns", 0) or 0)
+        if last_capture_ns > 0:
+            snapshot["capture_age_ms"] = int((time.monotonic_ns() - last_capture_ns) / 1_000_000)
+        snapshot["captured_samples"] = int(getattr(self.mic, "_captured_samples", 0) or 0)
+        snapshot["pending_chunk_count"] = int(self.mic.pending_chunk_count)
+        return snapshot
 
 
 class DummyRT:
@@ -102,7 +120,7 @@ class DummyRT:
 
 class DummyTransport:
     def __init__(self) -> None:
-        self.turn_mode = "server_vad"
+        self.turn_mode = "semantic_vad"
         self.calls: list[tuple[str, int]] = []
         self.close_calls = 0
         self.realtime: DummyRT | None = DummyRT()
@@ -213,7 +231,6 @@ class ScenarioHarness:
             assistant_audio_sink=lambda value: None,
             speech_started_sink=lambda: None,
             speech_stopped_sink=lambda: None,
-            response_created_sink=lambda response_id: None,
             response_done_sink=lambda: None,
             log_sink=lambda record_type, payload: self.state["logs"].append((record_type, payload)),
             aec_mode_setter=lambda value: self.state.__setitem__("aec_mode", value),
@@ -222,6 +239,7 @@ class ScenarioHarness:
             model="gpt-realtime",
             voice="alloy",
             noise_reduction="far_field",
+            semantic_vad_eagerness="low",
             tts_speed=1.0,
             server_vad_silence_ms=900,
             server_vad_prefix_ms=300,

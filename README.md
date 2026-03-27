@@ -1,15 +1,18 @@
 # Chatbot Kája
 
-Desktop aplikace v `PySide6` pro hlasovou konverzaci přes OpenAI Realtime API.
+Lokální aplikace s browserovým WebRTC voice frontendem a Python backendem pro bezpečné nastavení a volání OpenAI Realtime API.
 
 ## Co aplikace umí
 
-- hands-free hlasovou konverzaci přes tlačítko `Start` v záhlaví
+- hands-free hlasovou konverzaci přes tlačítko `Start` v záhlaví s `semantic_vad` turn-takingem
 - bezpečné zadání a lokální uložení OpenAI API klíče přímo v hlavním okně
 - EKG vizualizaci reagující na hlas a terminálový přepis posledních 10 řádků diskuze
-- barge-in během mluvení asistenta
+- barge-in během mluvení asistenta včetně serverového `conversation.item.truncate` při přerušení
 - adaptivní vícecestné tlumení self-hearing s odhadem latency, residual gate a double-talk ochranou
-- malý audio selftest v záhlaví
+- ručně spustitelný audio selftest v záhlaví (už neprobíhá automaticky při startu relace)
+- testovací function calling nástroj `spust_program`, který po výslovném požadavku uživatele umí lokálně spustit pouze `powershell`
+- tlačítkové nastavení hlasu, jazyka odpovědí, hlavního stylu, délky a formálnosti přímo na hlavní stránce
+- stejné volby nastavení dostupné i přes realtime function calling nástroje
 
 ## Požadavky
 
@@ -17,6 +20,10 @@ Desktop aplikace v `PySide6` pro hlasovou konverzaci přes OpenAI Realtime API.
 - funkční mikrofon a reproduktory nebo sluchátka
 - platný OpenAI API klíč
 ## Instalace
+
+Nejjednodussi start na Windows je dvojklikem na `run_kajovochat.bat`. Skript sam vytvori virtualni prostredi, doinstaluje zavislosti, spusti lokalni webovy server a otevre browser.
+
+Rucni instalace:
 
 ```bash
 python -m venv .venv
@@ -26,13 +33,27 @@ pip install -r requirements.txt
 
 ## Spuštění
 
-Hlavní aplikace:
+Nejjednodussi start na Windows:
+
+```bat
+run_kajovochat.bat
+```
+
+Alternativne PowerShell skript:
+
+```powershell
+.\run_kajovochat.ps1
+```
+
+Hlavní aplikace (webový voice frontend):
 
 ```bash
 python -m kajovochat
 ```
 
-Alternativní vstupní bod:
+Po startu se otevře browser na lokální adrese `http://127.0.0.1:8765/` nebo na nejbližším volném portu.
+
+Původní desktopový režim zůstává zachovaný jako alternativní vstupní bod:
 
 ```bash
 python app_gui.py
@@ -63,6 +84,11 @@ Konfigurace se ukládá do `settings.json` v uživatelském profilu aplikace. So
 - `kajovochat/orb/` původní orb engine ponechaný kvůli kompatibilitě a testům starších částí
 - `kajovochat/resources/assets/` obrázkové assety
 - `tests/` testy
+
+## Patch poznámky
+
+Shrnutí posledního voice runtime upgradu je v [VOICE_UPGRADE_NOTES.md](VOICE_UPGRADE_NOTES.md).
+Aktuální build navíc používá ruční selftest, `gpt-4o-transcribe`, `semantic_vad` s nízkou eagerness a automatickou volbu `near_field`/`far_field` noise reduction podle topologie zařízení.
 
 ## Test a kontrola
 
@@ -134,3 +160,15 @@ python3 tools/build_macos_app.py
 Výstup najdeš v `dist/ChatbotKaja.app`.
 
 Build používá `app_gui.py` jako vstupní bod, protože je to bezpečnější top-level script pro PyInstaller než balení `kajovochat/__main__.py`.
+
+## Windows build do EXE
+
+Z tohoto repozitare lze na Windows vytvorit samostatny PyInstaller build:
+
+```bat
+build_windows_exe.bat
+```
+
+Po dokonceni builda bude spustitelny soubor v `dist\ChatbotKaja\ChatbotKaja.exe`.
+
+Poznamka: PyInstaller neni cross-compiler, takze Windows `.exe` je potreba buildit primo na Windows.

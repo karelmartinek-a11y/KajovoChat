@@ -492,7 +492,7 @@ class RecoverySupervisor:
             return
         try:
             self.caption_sink("Realtime: obnovuji spojení…")
-            self.transport.ensure_connected(getattr(self.transport, "turn_mode", "server_vad"), self.telemetry.reconnect_attempts)
+            self.transport.ensure_connected(getattr(self.transport, "turn_mode", "semantic_vad"), self.telemetry.reconnect_attempts)
             self.log_sink(
                 "reconnect_ok",
                 {

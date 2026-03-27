@@ -323,7 +323,6 @@ class ConversationAudioRuntimeLoop:
                                 )
                             effective_aec_quality = max(effective_aec_quality, 0.1 if webrtc_success else 0.0)
                             now_for_diag = time.monotonic()
-                            owner._last_raw_in_level = float(in_level)
                             gate_decision = owner._session_manager.evaluate_capture_gate(
                                 mode=owner._mode,
                                 guard_active=guard_active,
@@ -420,14 +419,10 @@ class ConversationAudioRuntimeLoop:
                                 input_level=float(gate_decision.effective_input_level),
                                 voice_likelihood=float(voice_likelihood),
                                 now_monotonic=now_for_diag,
-                                drop_chunk=bool(drop_chunk),
-                                playback_active=bool(is_playing_out),
-                                barge_in_confirmed=bool(barge_in_confirmed),
                             )
                             if barge_in_confirmed and is_playing_out:
                                 owner._session_manager.note_user_turn_committed()
                             if drop_chunk:
-                                owner._last_post_gate_in_level = 0.0
                                 owner._last_in_level = 0.0
                                 if gate_outcome.should_log_echo_drop:
                                     owner._log_event(
@@ -439,14 +434,12 @@ class ConversationAudioRuntimeLoop:
                                         voice_likelihood=round(voice_likelihood, 3),
                                     )
                                 continue
-                            owner._last_post_gate_in_level = float(in_level)
                             owner._last_in_level = in_level
                             rt = owner._session_manager.transport.realtime
                             if rt is None:
                                 continue
                             try:
-                                if rt.append_audio_pcm16(processed_chunk):
-                                    owner._session_manager.note_input_audio_appended(len(processed_chunk))
+                                rt.append_audio_pcm16(processed_chunk)
                             except AttributeError:
                                 continue
 

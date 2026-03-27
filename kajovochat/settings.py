@@ -21,8 +21,8 @@ ORG_NAME = "Kajovo"
 KEYRING_SERVICE = "KajovoChat/OpenAI"
 
 ANSWER_LANGUAGE_MODE_CHOICES = [
-    ("follow_input", "Odpovídat jazykem uživatele"),
-    ("fixed", "Vždy odpovídat zvoleným jazykem"),
+    ("follow_input", "Podle uživatele"),
+    ("fixed", "Vždy zvolený jazyk"),
 ]
 
 LANGUAGE_CHOICES = [
@@ -33,10 +33,30 @@ LANGUAGE_CHOICES = [
     ("fr", "Francouzština"),
 ]
 
+VOICE_CHOICES = [
+    ("marin", "Marin"),
+    ("cedar", "Cedar"),
+    ("alloy", "Alloy"),
+    ("coral", "Coral"),
+    ("verse", "Verse"),
+]
+
 RESPONSE_STYLE_CHOICES = [
     ("stručný", "Stručný"),
     ("vědecký_s_analýzou", "Vědecký s analýzou"),
     ("normální", "Normální"),
+]
+
+RESPONSE_LENGTH_CHOICES = [
+    ("krátká", "Krátká"),
+    ("střední", "Střední"),
+    ("podrobná", "Podrobná"),
+]
+
+RESPONSE_FORMALITY_CHOICES = [
+    ("neformální", "Neformální"),
+    ("neutrální", "Neutrální"),
+    ("formální", "Formální"),
 ]
 
 LANG_CODE_TO_PROMPT = {
@@ -53,6 +73,18 @@ STYLE_PROMPTS = {
         "Odpovídej analyticky a strukturovaně. Pracuj explicitně s předpoklady, nejistotou a důvody závěrů."
     ),
     "normální": "Odpovídej přirozeně, užitečně a věcně jako běžný hlasový asistent.",
+}
+
+LENGTH_PROMPTS = {
+    "krátká": "Drž odpovědi krátké, vhodné pro plynulý hlasový dialog.",
+    "střední": "Drž odpovědi přiměřeně dlouhé a dobře poslouchatelné.",
+    "podrobná": "Když je to užitečné, odpovídej podrobněji a doplň důležité souvislosti.",
+}
+
+FORMALITY_PROMPTS = {
+    "neformální": "Mluv civilně, uvolněně a přirozeně, ale pořád věcně.",
+    "neutrální": "Mluv neutrálně, profesionálně a přístupně.",
+    "formální": "Mluv spíše formálně, zdvořile a uhlazeně.",
 }
 
 DEFAULT_AUDIO_GUARD_PROFILE = {
@@ -195,6 +227,47 @@ def _delete_stored_api_key(stored: str) -> None:
     except Exception:
         pass
 
+
+
+
+def voice_label(code: str) -> str:
+    for current_code, label in VOICE_CHOICES:
+        if current_code == code:
+            return label
+    return code
+
+
+def normalize_voice(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {code for code, _ in VOICE_CHOICES}:
+        return normalized
+    return "marin"
+
+
+def normalize_response_length(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    mapping = {
+        "krátká": "krátká",
+        "kratka": "krátká",
+        "střední": "střední",
+        "stredni": "střední",
+        "podrobná": "podrobná",
+        "podrobna": "podrobná",
+    }
+    return mapping.get(normalized, "střední")
+
+
+def normalize_response_formality(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    mapping = {
+        "neformální": "neformální",
+        "neformalni": "neformální",
+        "neutrální": "neutrální",
+        "neutralni": "neutrální",
+        "formální": "formální",
+        "formalni": "formální",
+    }
+    return mapping.get(normalized, "neutrální")
 
 def language_label(code: str) -> str:
     for current_code, label in LANGUAGE_CHOICES:
@@ -343,7 +416,10 @@ def _migrate_response_style(data: dict) -> str:
 class AppSettings:
     answer_language_mode: str = "follow_input"
     fixed_answer_language: str = "cs"
+    voice: str = "marin"
     response_style: str = "normální"
+    response_length: str = "střední"
+    response_formality: str = "neutrální"
     log_dir: str = str((Path.home() / "Documents" / "ChatbotKajaLogs").resolve())
     openai_api_key_masked: str = ""
     audio_guard_profile: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_AUDIO_GUARD_PROFILE))
@@ -354,6 +430,10 @@ class AppSettings:
     audio_diagnostics_enabled: bool = False
 
     def __post_init__(self) -> None:
+        self.voice = normalize_voice(self.voice)
+        self.response_style = normalize_response_style(self.response_style)
+        self.response_length = normalize_response_length(self.response_length)
+        self.response_formality = normalize_response_formality(self.response_formality)
         self.audio_aec_mode = normalize_audio_aec_mode(self.audio_aec_mode)
         self.audio_device_mode = normalize_audio_device_mode(self.audio_device_mode)
         self.audio_session_profile = normalize_audio_session_profile(self.audio_session_profile)
@@ -431,11 +511,20 @@ class AppSettings:
         if "fixed_answer_language" not in data:
             data["fixed_answer_language"] = normalize_fixed_language(data.get("language", "cs"))
         data["response_style"] = _migrate_response_style(data)
+        if "voice" not in data:
+            data["voice"] = "marin"
+        if "response_length" not in data:
+            data["response_length"] = "střední"
+        if "response_formality" not in data:
+            data["response_formality"] = "neutrální"
 
         settings = cls(**{key: value for key, value in data.items() if key in cls.__dataclass_fields__})
         settings.answer_language_mode = normalize_answer_language_mode(settings.answer_language_mode)
         settings.fixed_answer_language = normalize_fixed_language(settings.fixed_answer_language)
+        settings.voice = normalize_voice(settings.voice)
         settings.response_style = normalize_response_style(settings.response_style)
+        settings.response_length = normalize_response_length(settings.response_length)
+        settings.response_formality = normalize_response_formality(settings.response_formality)
         original_aec_mode = settings.audio_aec_mode
         settings.audio_aec_mode = _promote_audio_aec_mode_for_installed_native_backend(settings.audio_aec_mode)
         settings.audio_device_mode = normalize_audio_device_mode(settings.audio_device_mode)
@@ -482,5 +571,13 @@ def build_system_prompt(settings: AppSettings, resolved_language: str) -> str:
     style_prompt = STYLE_PROMPTS.get(settings.response_style)
     if style_prompt:
         prompt_parts.append(style_prompt)
+
+    length_prompt = LENGTH_PROMPTS.get(settings.response_length)
+    if length_prompt:
+        prompt_parts.append(length_prompt)
+
+    formality_prompt = FORMALITY_PROMPTS.get(settings.response_formality)
+    if formality_prompt:
+        prompt_parts.append(formality_prompt)
 
     return "\n".join(prompt_parts).strip() + "\n"

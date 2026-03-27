@@ -47,7 +47,7 @@ class GuardAdaptor:
             self._state = "barge_ready"
         elif aec_aware and playback_ratio > 0.22 and avg_output > 0.03 and similarity < 0.08:
             self._state = "aec_aware"
-        elif similarity > 0.28 and playback_ratio > 0.18 and voice_likelihood < 0.5:
+        elif similarity > 0.28 and playback_ratio > 0.18:
             self._state = "echo_heavy"
         elif barge_in_ratio > 0.08 and voice_likelihood > 0.46:
             self._state = "barge_ready"

@@ -26,7 +26,6 @@ def test_realtime_service_parses_callbacks() -> None:
     service.on_vad_speech_started = lambda: seen.setdefault("speech_started", True)
     service.on_vad_speech_stopped = lambda: seen.setdefault("speech_stopped", True)
     service.on_response_done = lambda: seen.setdefault("response_done", True)
-    service.on_event = lambda evt: seen.setdefault("event_type", evt.get("type"))
 
     service._handle_event({"type": "input_audio_buffer.speech_started"})
     service._handle_event({"type": "input_audio_buffer.speech_stopped"})
@@ -41,7 +40,6 @@ def test_realtime_service_parses_callbacks() -> None:
 
     assert seen["speech_started"] is True
     assert seen["speech_stopped"] is True
-    assert seen["event_type"] == "input_audio_buffer.speech_started"
     assert seen["user"] == "Ahoj"
     assert seen["delta"] == "Naz"
     assert seen["assistant"] == "Nazdar"
@@ -120,80 +118,6 @@ def test_realtime_service_retries_transient_handshake_failure_before_connecting(
     assert statuses.count("Realtime: connected") == 1
 
 
-def test_realtime_service_append_audio_reports_send_failure() -> None:
-    service = RealtimeService(
-        RealtimeConfig(
-            api_key="sk-test-123",
-            model="gpt-realtime",
-            instructions="Test",
-            voice="alloy",
-        )
-    )
-
-    class _FailingWs:
-        def send(self, data: str) -> None:
-            del data
-            raise RuntimeError("socket closed")
-
-    errors: list[str] = []
-    service.on_error = errors.append
-    service._ws = _FailingWs()
-    service._connected.set()
-    service._closed.clear()
-
-    assert service.append_audio_pcm16(b"\x01\x02") is False
-    assert errors == ["socket closed"]
-
-
-def test_realtime_service_ignores_nonfatal_server_errors() -> None:
-    service = RealtimeService(
-        RealtimeConfig(
-            api_key="sk-test-123",
-            model="gpt-realtime",
-            instructions="Test",
-            voice="alloy",
-        )
-    )
-    errors: list[str] = []
-    service.on_error = errors.append
-
-    service._handle_event(
-        {
-            "type": "error",
-            "error": {
-                "message": "Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.",
-            },
-        }
-    )
-    service._handle_event(
-        {
-            "type": "error",
-            "error": {
-                "message": "Conversation already has an active response in progress: resp_test. Wait until the response is finished before creating a new one.",
-            },
-        }
-    )
-
-    assert errors == []
-
-
-def test_realtime_service_reports_other_server_errors() -> None:
-    service = RealtimeService(
-        RealtimeConfig(
-            api_key="sk-test-123",
-            model="gpt-realtime",
-            instructions="Test",
-            voice="alloy",
-        )
-    )
-    errors: list[str] = []
-    service.on_error = errors.append
-
-    service._handle_event({"type": "error", "error": {"message": "Server exploded"}})
-
-    assert errors == ["Server exploded"]
-
-
 def test_realtime_service_raises_last_handshake_error_after_retry_exhaustion(monkeypatch) -> None:
     class _FakeWebSocketApp:
         def __init__(self, url, header, on_open, on_message, on_error, on_close) -> None:
@@ -230,3 +154,50 @@ def test_realtime_service_raises_last_handshake_error_after_retry_exhaustion(mon
 
     with pytest.raises(RuntimeError, match="504 Gateway Time-out"):
         service.connect(timeout_s=0.05, max_attempts=2, retry_delay_s=0.0)
+
+
+def test_realtime_service_builds_semantic_vad_session_update() -> None:
+    service = RealtimeService(
+        RealtimeConfig(
+            api_key="sk-test-123",
+            model="gpt-realtime",
+            instructions="Test",
+            voice="alloy",
+        )
+    )
+    sent: list[dict] = []
+    service._send = lambda event: sent.append(event) or True  # type: ignore[method-assign]
+
+    service._send_session_update()
+
+    assert sent
+    session = sent[-1]["session"]
+    assert session["audio"]["input"]["turn_detection"]["type"] == "semantic_vad"
+    assert session["audio"]["input"]["turn_detection"]["eagerness"] == "low"
+    assert session["audio"]["input"]["transcription"]["model"] == "gpt-4o-transcribe"
+
+
+def test_realtime_service_can_truncate_current_response_by_buffered_audio() -> None:
+    service = RealtimeService(
+        RealtimeConfig(
+            api_key="sk-test-123",
+            model="gpt-realtime",
+            instructions="Test",
+            voice="alloy",
+        )
+    )
+    service._active_output_item_id = "item_123"
+    service._active_output_content_index = 1
+    service._active_output_pcm_bytes = 24000  # 500 ms mono PCM16 at 24 kHz
+
+    sent: list[dict] = []
+    service._send = lambda event: sent.append(event) or True  # type: ignore[method-assign]
+
+    ok = service.truncate_current_response(buffered_audio_bytes=4800)
+
+    assert ok is True
+    assert sent[-1]["type"] == "conversation.item.truncate"
+    assert sent[-1]["item_id"] == "item_123"
+    assert sent[-1]["content_index"] == 1
+    assert sent[-1]["audio_end_ms"] == 400
+    assert service._active_output_item_id is None

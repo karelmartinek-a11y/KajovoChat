@@ -8,7 +8,7 @@ from kajovochat.audio.telemetry import AudioTelemetry
 
 class _DummyTransport:
     def __init__(self) -> None:
-        self.turn_mode = "server_vad"
+        self.turn_mode = "semantic_vad"
         self.realtime = None
         self.ensure_connected_calls = 0
         self.closed = False

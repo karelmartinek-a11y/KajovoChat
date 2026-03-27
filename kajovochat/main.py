@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import sys
 import queue
 import re
@@ -36,7 +35,7 @@ from .settings import (
 from .audio.voice_gate import backend_aware_aec_metrics as _backend_aware_aec_metrics
 from .audio.bootstrap import build_conversation_audio_stack
 from .audio.runtime_resources import AudioRuntimeResources
-from .audio.selftest import evaluate_audio_preflight, run_audio_guard_selftest as _run_audio_guard_selftest_impl
+from .audio.selftest import run_audio_guard_selftest as _run_audio_guard_selftest_impl
 from .dialogs.settings_dialog import SettingsDialog
 from .audio.devices import (
     build_device_fingerprint,
@@ -84,11 +83,12 @@ _REALTIME_MODEL = "gpt-realtime"
 _TTS_VOICE = "alloy"
 _TTS_SPEED = 1.0
 _NOISE_REDUCTION = "far_field"
+_SEMANTIC_VAD_EAGERNESS = "low"
 _SERVER_VAD_SILENCE_MS = 900
 _SERVER_VAD_PREFIX_MS = 300
 _SERVER_VAD_THRESHOLD = 0.72
 _PLAYBACK_ACTIVITY_LEVEL = 0.035
-_ECHO_TRAILING_HOLD_S = 0.18
+_ECHO_TRAILING_HOLD_S = 0.28
 _ECHO_SIMILARITY_DROP = 0.82
 _ECHO_SIMILARITY_SOFT = 0.68
 _BARGE_IN_MIN_INPUT_LEVEL = 0.06
@@ -209,12 +209,9 @@ class ConversationWorker(QObject):
 
         self._mode: str = "idle"  # "handsfree" | "ptt" | "idle"
         # Level signals are throttled to avoid saturating the Qt event loop.
-        self._last_raw_in_level: float = 0.0
-        self._last_post_gate_in_level: float = 0.0
         self._last_in_level: float = 0.0
         self._last_out_level: float = 0.0
         self._last_level_emit_t: float = 0.0
-        self._echo_trailing_hold_s: float = _ECHO_TRAILING_HOLD_S
 
         # True while waiting for server transcription completion.
 
@@ -232,6 +229,7 @@ class ConversationWorker(QObject):
             realtime_model=_REALTIME_MODEL,
             tts_voice=_TTS_VOICE,
             noise_reduction=_NOISE_REDUCTION,
+            semantic_vad_eagerness=_SEMANTIC_VAD_EAGERNESS,
             tts_speed=_TTS_SPEED,
             server_vad_silence_ms=_SERVER_VAD_SILENCE_MS,
             server_vad_prefix_ms=_SERVER_VAD_PREFIX_MS,
@@ -654,7 +652,6 @@ class MainWindow(QMainWindow):
     def _calibrate_audio_guard(self, *, trigger: str, show_dialog: bool, restart_after: bool) -> dict[str, object]:
         self.status_label.setText("Probíhá automatická kalibrace reproduktoru a mikrofonu.")
         self._append_terminal_line(f"SELFTEST START [{trigger}]")
-        logging.getLogger("kajovochat").info("audio_selftest_start trigger=%s restart_after=%s", trigger, restart_after)
         result = run_audio_guard_selftest()
 
         lines = []
@@ -665,18 +662,6 @@ class MainWindow(QMainWindow):
 
         profile = result.get("profile")
         calibration = result.get("calibration") if isinstance(result.get("calibration"), dict) else {}
-        existing_calibration = self.settings.audio_guard_calibration if isinstance(self.settings.audio_guard_calibration, dict) else {}
-        if calibration:
-            in_dev, _ = pick_audio_device("input", None)
-            out_dev, _ = pick_audio_device("output", None)
-            new_fingerprint = str(calibration.get("device_fingerprint") or build_device_fingerprint(in_dev, out_dev, 24000))
-            old_fingerprint = str(existing_calibration.get("device_fingerprint", "") or "")
-            old_latency = int(existing_calibration.get("latency_samples", 0) or 0)
-            if int(calibration.get("latency_samples", 0) or 0) <= 0 and old_latency > 0 and new_fingerprint == old_fingerprint:
-                calibration = dict(calibration)
-                calibration["latency_samples"] = old_latency
-                calibration["filter_length"] = int(existing_calibration.get("filter_length", calibration.get("filter_length", 256)) or calibration.get("filter_length", 256) or 256)
-                self._append_terminal_line("SELFTEST INFO: zachovávám poslední platnou latenci z předchozí kalibrace.")
         if isinstance(profile, dict) and profile:
             self._apply_audio_profile(profile, source=trigger)
         if calibration:
@@ -696,30 +681,8 @@ class MainWindow(QMainWindow):
                 "input_device_name": input_name,
                 "output_device_name": output_name,
                 "device_fingerprint": calibration.get("device_fingerprint") or build_device_fingerprint(in_dev, out_dev, 24000),
-                "last_guard_state": "selftest",
-                "last_guard_top_reason": "",
-                "last_drop_rate": 0.0,
-                "last_monitor_recommendation": "stable",
             }
             self.settings.save()
-        logging.getLogger("kajovochat").info(
-            "audio_selftest_result trigger=%s ok=%s startup_ready=%s checks=%s profile=%s calibration=%s",
-            trigger,
-            bool(result.get("ok")),
-            bool(result.get("startup_ready")),
-            [
-                {
-                    "name": str(item.get("name", "")),
-                    "ok": bool(item.get("ok")),
-                    "non_blocking": bool(item.get("non_blocking", False)),
-                    "detail": str(item.get("detail", "")),
-                }
-                for item in result.get("checks", [])
-                if isinstance(item, dict)
-            ],
-            {key: float(value) for key, value in (profile or {}).items()} if isinstance(profile, dict) else {},
-            calibration if isinstance(calibration, dict) else {},
-        )
 
         if restart_after and result.get("ok"):
             self._handsfree_running = True
@@ -733,24 +696,6 @@ class MainWindow(QMainWindow):
         if show_dialog:
             QMessageBox.information(self, "Audio selftest", "Audio guard selftest\n" + "\n".join(lines))
         return result
-
-    def _audio_preflight_reason(self) -> str:
-        calibration = self.settings.audio_guard_calibration if isinstance(self.settings.audio_guard_calibration, dict) else {}
-        in_dev, _ = pick_audio_device("input", None)
-        out_dev, _ = pick_audio_device("output", None)
-        current_fingerprint = build_device_fingerprint(in_dev, out_dev, 24000)
-        should_run, reason = evaluate_audio_preflight(
-            calibration=calibration,
-            current_device_fingerprint=current_fingerprint,
-        )
-        logging.getLogger("kajovochat").info(
-            "audio_preflight_decision should_run=%s reason=%s current_fingerprint=%s calibration=%s",
-            should_run,
-            reason,
-            current_fingerprint,
-            calibration,
-        )
-        return reason if should_run else ""
 
     def _save_defaults(self) -> None:
         self.settings.save()
@@ -793,10 +738,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "API klíč", "Chybí OpenAI API klíč.")
             return
 
-        preflight_reason = self._audio_preflight_reason()
-        if preflight_reason:
-            self._append_terminal_line(f"SYS: Spouštím startovní audio preflight ({preflight_reason}).")
-            self._calibrate_audio_guard(trigger=f"preflight:{preflight_reason}", show_dialog=False, restart_after=False)
+        if not isinstance(self.settings.audio_guard_calibration, dict) or not self.settings.audio_guard_calibration:
+            self._append_terminal_line("SYS: Audio selftest je volitelný a spouští se jen tlačítkem Audio test.")
 
         self._handsfree_running = True
         self.head.set_running(True)
@@ -850,9 +793,6 @@ class MainWindow(QMainWindow):
         audio_mode = str(data.get("audio_mode", "notebook_builtin"))
         aec_aware = "on" if bool(data.get("aec_aware")) else "off"
         learning_mode = "on" if bool(data.get("learning_mode")) else "off"
-        learning_remaining_s = float(data.get("learning_remaining_s", 0.0) or 0.0)
-        monitor_state = str(data.get("monitor_state", "stable"))
-        top_reason = str(telemetry.get("top_reason", "-") or "-")
         input_name = str(data.get("input_device_name", "-"))
         output_name = str(data.get("output_device_name", "-"))
         self.guard_debug_label.setText(
@@ -862,15 +802,11 @@ class MainWindow(QMainWindow):
             f"similarity={float(telemetry.get('avg_similarity', 0.0) or 0.0):.3f}  "
             f"voice={float(telemetry.get('avg_voice_likelihood', 0.0) or 0.0):.3f}  "
             f"aec={float(telemetry.get('avg_aec_quality', 0.0) or 0.0):.3f}\n"
-            f"raw_in={float(data.get('raw_input_level', 0.0) or 0.0):.3f}  "
-            f"post_in={float(data.get('post_gate_input_level', 0.0) or 0.0):.3f}  "
-            f"out={float(data.get('output_level', 0.0) or 0.0):.3f}\n"
             f"echo_soft={float(profile.get('echo_similarity_soft', 0.0) or 0.0):.3f}  "
             f"echo_drop={float(profile.get('echo_similarity_drop', 0.0) or 0.0):.3f}  "
             f"barge_in={float(profile.get('barge_in_min_input_level', 0.0) or 0.0):.3f}  "
             f"playback={float(profile.get('playback_activity_level', 0.0) or 0.0):.3f}\n"
-            f"monitor={monitor_state}  top_reason={top_reason}  learning={learning_mode}({int(learning_remaining_s)}s)  latency={int(data.get('calibration', {}).get('latency_samples', 0) or 0)}\n"
-            f"mode={audio_mode}  aec={aec_aware}\n"
+            f"mode={audio_mode}  aec={aec_aware}  learning={learning_mode}  latency={int(data.get('calibration', {}).get('latency_samples', 0) or 0)}\n"
             f"mic={input_name[:42]} | spk={output_name[:42]}"
         )
 

@@ -1,4 +1,4 @@
-from .main import main
+from .web.server import main
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

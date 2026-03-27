@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chatbot Kája</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="topbar">
+      <div class="brand-wrap">
+        <img src="/assets/logo_chatbot_kaja.png" alt="Logo Chatbot Kája" class="brand-logo">
+        <div>
+          <h1>Chatbot Kája</h1>
+          <p>Hlasový asistent s WebRTC front-endem a EKG vizualizací</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <input id="apiKeyInput" class="text-input" type="password" autocomplete="off" placeholder="OpenAI API klíč">
+        <button id="saveKeyBtn" class="btn">Uložit klíč</button>
+        <button id="deleteKeyBtn" class="btn">Smazat klíč</button>
+        <button id="audioTestBtn" class="btn">Audio test</button>
+        <button id="startStopBtn" class="btn btn-primary">Start</button>
+        <button id="settingsBtn" class="btn btn-primary">Nastavení</button>
+        <button id="savePrefsBtn" class="btn">Uložit</button>
+        <button id="clearBtn" class="btn">Vyčistit relaci</button>
+        <button id="exitBtn" class="btn btn-danger">Konec</button>
+      </div>
+    </header>
+
+    <section id="statusPill" class="status-pill">Připraveno</section>
+
+    <section id="guardPanel" class="guard-panel">
+      GUARD: čekám na WebRTC telemetrii
+      stav=idle  mic=0.00  out=0.00  dc=closed  pc=new
+      aec=req/on  ns=req/on  agc=req/on  noise=far_field  vad=semantic_low
+    </section>
+
+    <section class="voice-disclosure">Poznámka: slyšíš synteticky generovaný AI hlas.</section>
+
+    <main class="visual-card">
+      <div class="canvas-wrap">
+        <canvas id="ekgCanvas" width="1600" height="620"></canvas>
+      </div>
+      <section class="terminal-panel">
+        <div class="terminal-title">TERMINÁL</div>
+        <div id="terminalLog" class="terminal-log"></div>
+      </section>
+    </main>
+  </div>
+
+  <audio id="remoteAudio" autoplay playsinline></audio>
+
+  <dialog id="settingsDialog" class="modal">
+    <form method="dialog" class="modal-body">
+      <h2>Nastavení</h2>
+      <label>
+        Režim jazyka odpovědí
+        <select id="answerLanguageMode">
+          <option value="follow_input">Odpovídat jazykem uživatele</option>
+          <option value="fixed">Vždy odpovídat zvoleným jazykem</option>
+        </select>
+      </label>
+      <label>
+        Pevný jazyk odpovědí
+        <select id="fixedAnswerLanguage">
+          <option value="cs">Čeština</option>
+          <option value="en">Angličtina</option>
+          <option value="de">Němčina</option>
+          <option value="sk">Slovenština</option>
+          <option value="fr">Francouzština</option>
+        </select>
+      </label>
+      <label>
+        Styl odpovědi
+        <select id="responseStyle">
+          <option value="stručný">Stručný</option>
+          <option value="vědecký_s_analýzou">Vědecký s analýzou</option>
+          <option value="normální">Normální</option>
+        </select>
+      </label>
+      <label>
+        Hlas asistenta
+        <select id="realtimeVoice">
+          <option value="marin">Marin</option>
+          <option value="cedar">Cedar</option>
+          <option value="alloy">Alloy</option>
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button id="settingsApplyBtn" value="default" class="btn btn-primary" type="button">Použít a uložit</button>
+        <button class="btn" value="cancel">Zavřít</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="reportDialog" class="modal">
+    <div class="modal-body modal-report">
+      <h2 id="reportTitle">Výsledek</h2>
+      <pre id="reportBody"></pre>
+      <div class="modal-actions">
+        <button id="reportCloseBtn" class="btn btn-primary">Zavřít</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

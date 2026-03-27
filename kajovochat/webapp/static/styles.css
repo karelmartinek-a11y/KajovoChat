@@ -1,0 +1,243 @@
+:root {
+  --brand-blue: #3cb0db;
+  --brand-yellow: #fcd237;
+  --navy: #1a3451;
+  --bg: #0b1220;
+  --surface: #111a2b;
+  --surface-2: #0e1726;
+  --text: #eaf2f7;
+  --text-muted: rgba(234, 242, 247, 0.72);
+  --border: rgba(255, 255, 255, 0.16);
+  --guard-bg: rgba(7, 22, 18, 0.82);
+  --guard-fg: #9bffc3;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: radial-gradient(circle at top, #152035, var(--bg) 36%);
+  color: var(--text);
+  font-family: "Segoe UI", Inter, Arial, sans-serif;
+}
+
+body {
+  padding: 18px;
+}
+
+.page-shell {
+  max-width: 1560px;
+  margin: 0 auto;
+}
+
+.topbar {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+}
+
+.brand-wrap h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.brand-wrap p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.text-input,
+select,
+.btn {
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.24);
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  min-height: 44px;
+  padding: 0 14px;
+}
+
+.text-input {
+  min-width: 240px;
+}
+
+.text-input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--brand-blue);
+  box-shadow: 0 0 0 2px rgba(60,176,219,0.18);
+}
+
+.btn {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn:hover {
+  background: rgba(255,255,255,0.14);
+}
+
+.btn-primary {
+  background: rgba(60,176,219,0.22);
+  border-color: rgba(60,176,219,0.72);
+}
+
+.btn-danger {
+  background: rgba(252,210,55,0.14);
+  border-color: rgba(252,210,55,0.58);
+}
+
+.status-pill,
+.guard-panel,
+.voice-disclosure {
+  margin-top: 14px;
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.status-pill {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.guard-panel {
+  background: var(--guard-bg);
+  border: 1px solid rgba(124,255,141,0.24);
+  color: var(--guard-fg);
+  white-space: pre-line;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.voice-disclosure {
+  background: rgba(252,210,55,0.12);
+  border: 1px solid rgba(252,210,55,0.28);
+  color: rgba(252, 238, 194, 0.96);
+}
+
+.visual-card {
+  margin-top: 14px;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(84, 161, 119, 0.18);
+  background: linear-gradient(180deg, rgba(5, 22, 18, 0.92), rgba(3, 10, 8, 0.96));
+  box-shadow: 0 24px 60px rgba(0,0,0,0.24);
+}
+
+.canvas-wrap {
+  padding: 18px 18px 8px;
+}
+
+#ekgCanvas {
+  width: 100%;
+  height: min(58vh, 620px);
+  display: block;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #09111a 0%, #07171d 48%, #020705 100%);
+}
+
+.terminal-panel {
+  padding: 0 24px 24px;
+}
+
+.terminal-title {
+  color: #8fffd0;
+  font-family: Consolas, "Courier New", monospace;
+  margin-bottom: 10px;
+  letter-spacing: 0.08em;
+}
+
+.terminal-log {
+  min-height: 190px;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(6, 12, 10, 0.74);
+  color: #caffdd;
+  border: 1px solid rgba(124,255,141,0.14);
+  font-family: Consolas, "Courier New", monospace;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.modal {
+  border: none;
+  border-radius: 18px;
+  padding: 0;
+  width: min(540px, calc(100vw - 24px));
+  background: transparent;
+}
+
+.modal::backdrop {
+  background: rgba(0,0,0,0.58);
+}
+
+.modal-body {
+  background: var(--surface);
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  padding: 22px;
+  display: grid;
+  gap: 14px;
+}
+
+.modal-body h2 {
+  margin: 0 0 4px;
+}
+
+.modal-body label {
+  display: grid;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.modal-report pre {
+  margin: 0;
+  white-space: pre-wrap;
+  max-height: 60vh;
+  overflow: auto;
+  background: rgba(255,255,255,0.05);
+  border-radius: 12px;
+  padding: 14px;
+  color: var(--text);
+}
+
+@media (max-width: 980px) {
+  body { padding: 12px; }
+  .text-input { width: 100%; }
+  .header-actions { width: 100%; }
+  #ekgCanvas { height: 44vh; }
+}
