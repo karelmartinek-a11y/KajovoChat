@@ -136,6 +136,7 @@ def _build_manager(monkeypatch, *, aec_mode: str = "windows_system_aec", audio_m
         assistant_audio_sink=lambda value: None,
         speech_started_sink=lambda: None,
         speech_stopped_sink=lambda: None,
+        response_created_sink=lambda response_id: None,
         response_done_sink=lambda: None,
         log_sink=lambda record_type, payload: state["logs"].append((record_type, payload)),
         aec_mode_setter=lambda value: state.__setitem__("aec_mode", value),
@@ -423,7 +424,7 @@ def test_audio_session_manager_recovers_to_fallback_without_failing_session(monk
     assert manager.session_state == SessionState.ACTIVE
 
 
-def test_handsfree_local_fallback_commits_turn_when_server_vad_never_stops(monkeypatch) -> None:
+def test_handsfree_local_fallback_starts_without_playback_even_in_server_vad(monkeypatch) -> None:
     manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     manager.start_handsfree()
@@ -431,22 +432,25 @@ def test_handsfree_local_fallback_commits_turn_when_server_vad_never_stops(monke
     manager.note_input_audio_appended(4800)
     now = time.monotonic()
     forced = False
-    for idx in range(18):
+    for idx in range(3):
         forced = manager.maybe_force_server_vad_turn_commit(
-            input_level=0.01,
-            voice_likelihood=0.05,
+            input_level=0.09,
+            voice_likelihood=0.42,
             now_monotonic=now + 0.4 + (idx * 0.04),
         )
 
-    assert forced is True
-    assert realtime.committed is True
-    assert realtime.requested is True
-    assert manager.awaiting_transcript is True
-    fallback_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_local_fallback"]
-    assert fallback_logs
+    assert forced is False
+    assert realtime.committed is False
+    assert realtime.requested is False
+    assert manager.awaiting_transcript is False
+    assert manager.voice_gate_runtime.local_turn_active is True
+    started_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback"]
+    assert started_logs
+    blocked_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback_blocked"]
+    assert blocked_logs == []
 
 
-def test_handsfree_local_turn_detection_commits_without_server_speech_events(monkeypatch) -> None:
+def test_handsfree_local_turn_detection_starts_without_server_speech_events(monkeypatch) -> None:
     manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     manager.start_handsfree()
@@ -472,10 +476,9 @@ def test_handsfree_local_turn_detection_commits_without_server_speech_events(mon
     assert realtime.committed is True
     assert realtime.requested is True
     started_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback"]
-    stopped_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_local_fallback"]
     assert started_logs
-    assert stopped_logs
-    assert stopped_logs[-1]["fallback_reason"] == "local_silence"
+    blocked_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback_blocked"]
+    assert blocked_logs == []
 
 
 def test_handsfree_local_fallback_does_not_start_on_dropped_echo(monkeypatch) -> None:
@@ -498,6 +501,27 @@ def test_handsfree_local_fallback_does_not_start_on_dropped_echo(monkeypatch) ->
     assert realtime.committed is False
 
 
+def test_handsfree_local_fallback_does_not_start_without_buffered_input_audio(monkeypatch) -> None:
+    manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
+
+    manager.start_handsfree()
+    now = time.monotonic()
+    for idx in range(3):
+        forced = manager.maybe_force_server_vad_turn_commit(
+            input_level=0.09,
+            voice_likelihood=0.42,
+            now_monotonic=now + (idx * 0.04),
+        )
+        assert forced is False
+
+    assert manager.voice_gate_runtime.local_turn_active is False
+    assert manager.voice_gate_runtime.local_voice_streak == 0
+    assert realtime.committed is False
+    blocked_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback_blocked"]
+    assert blocked_logs
+    assert blocked_logs[-1]["reason"] == "missing_input_audio"
+
+
 def test_handsfree_local_fallback_waits_after_response_done(monkeypatch) -> None:
     manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
@@ -518,6 +542,7 @@ def test_handsfree_local_fallback_waits_after_response_done(monkeypatch) -> None
     assert manager.voice_gate_runtime.local_turn_active is False
     assert manager.voice_gate_runtime.local_voice_streak == 0
     assert hold_until > now
+    assert hold_until - now <= 0.2
     started_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback"]
     assert started_logs == []
     assert realtime.committed is False
@@ -531,8 +556,9 @@ def test_handsfree_local_fallback_waits_after_response_done(monkeypatch) -> None
         )
 
     assert forced is False
-    started_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback"]
-    assert started_logs
+    assert manager.voice_gate_runtime.local_turn_active is True
+    blocked_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback_blocked"]
+    assert blocked_logs == []
 
 
 def test_handsfree_local_fallback_does_not_start_while_playback_is_active(monkeypatch) -> None:
@@ -554,8 +580,10 @@ def test_handsfree_local_fallback_does_not_start_while_playback_is_active(monkey
         assert forced is False
 
     assert manager.voice_gate_runtime.local_turn_active is False
-    assert manager.voice_gate_runtime.local_voice_streak == 3
-    assert not [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback"]
+    assert manager.voice_gate_runtime.local_voice_streak == 0
+    blocked_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback_blocked"]
+    assert blocked_logs
+    assert blocked_logs[-1]["reason"] == "server_vad_authority"
     assert realtime.committed is False
 
     forced = False
@@ -570,7 +598,7 @@ def test_handsfree_local_fallback_does_not_start_while_playback_is_active(monkey
 
     assert forced is False
     started_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback"]
-    assert started_logs == []
+    assert started_logs
 
 
 def test_handsfree_local_fallback_does_not_start_when_barge_in_is_confirmed(monkeypatch) -> None:
@@ -591,13 +619,13 @@ def test_handsfree_local_fallback_does_not_start_when_barge_in_is_confirmed(monk
         )
         assert forced is False
 
-    assert manager.voice_gate_runtime.local_turn_active is False
+    assert manager.voice_gate_runtime.local_turn_active is True
     started_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_started_local_fallback"]
-    assert started_logs == []
+    assert started_logs
     assert realtime.committed is False
 
 
-def test_server_speech_stopped_is_ignored_after_local_fallback_commit(monkeypatch) -> None:
+def test_server_speech_stopped_commits_normally_without_local_fallback(monkeypatch) -> None:
     manager, state, _realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     manager.start_handsfree()
@@ -614,12 +642,11 @@ def test_server_speech_stopped_is_ignored_after_local_fallback_commit(monkeypatc
 
     manager.handle_speech_stopped()
 
-    assert manager.telemetry.turns_total == turns_before
-    ignored_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_ignored"]
-    assert ignored_logs
+    assert manager.telemetry.turns_total == turns_before + 1
+    assert not [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_ignored"]
 
 
-def test_server_speech_stopped_is_ignored_even_after_transcript_arrives(monkeypatch) -> None:
+def test_server_speech_stopped_commits_even_after_transcript_arrives_without_local_fallback(monkeypatch) -> None:
     manager, state, _realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     manager.start_handsfree()
@@ -637,12 +664,11 @@ def test_server_speech_stopped_is_ignored_even_after_transcript_arrives(monkeypa
     turns_before = manager.telemetry.turns_total
     manager.handle_speech_stopped()
 
-    assert manager.telemetry.turns_total == turns_before
-    ignored_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_ignored"]
-    assert ignored_logs
+    assert manager.telemetry.turns_total == turns_before + 1
+    assert not [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_ignored"]
 
 
-def test_handsfree_watchdog_commit_works_even_when_levels_stay_high(monkeypatch) -> None:
+def test_handsfree_watchdog_commit_requests_response_for_server_turn(monkeypatch) -> None:
     manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     manager.start_handsfree()
@@ -660,12 +686,12 @@ def test_handsfree_watchdog_commit_works_even_when_levels_stay_high(monkeypatch)
     assert forced is True
     assert realtime.committed is True
     assert realtime.requested is True
-    fallback_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_local_fallback"]
-    assert fallback_logs
-    assert fallback_logs[-1]["fallback_reason"] == "server_vad_watchdog"
+    started_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_local_fallback"]
+    assert started_logs
+    assert started_logs[-1]["fallback_reason"] == "server_vad_watchdog"
 
 
-def test_handsfree_idle_watchdog_commits_even_without_new_mic_chunks(monkeypatch) -> None:
+def test_handsfree_idle_watchdog_requests_response_for_server_turn(monkeypatch) -> None:
     manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     manager.start_handsfree()
@@ -682,10 +708,9 @@ def test_handsfree_idle_watchdog_commits_even_without_new_mic_chunks(monkeypatch
     assert forced is True
     assert realtime.committed is True
     assert realtime.requested is True
-    fallback_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_local_fallback"]
-    assert fallback_logs
-    assert fallback_logs[-1]["fallback_reason"] == "server_vad_watchdog_idle"
-    assert fallback_logs[-1]["triggered_without_chunk"] is True
+    started_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_stopped_local_fallback"]
+    assert started_logs
+    assert started_logs[-1]["fallback_reason"] == "server_vad_watchdog_idle"
 
 
 def test_handsfree_idle_watchdog_skips_commit_when_buffer_is_too_small(monkeypatch) -> None:
@@ -712,7 +737,7 @@ def test_handsfree_idle_watchdog_skips_commit_when_buffer_is_too_small(monkeypat
     assert manager.voice_gate_runtime.local_turn_active is False
 
 
-def test_handsfree_server_speech_started_keeps_buffered_audio_until_commit(monkeypatch) -> None:
+def test_handsfree_server_speech_started_commits_buffered_audio_and_requests_response(monkeypatch) -> None:
     manager, _state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     manager.start_handsfree()
@@ -727,12 +752,13 @@ def test_handsfree_server_speech_started_keeps_buffered_audio_until_commit(monke
             now_monotonic=now + 0.4 + (idx * 0.04),
         )
 
-    assert forced is True
-    assert realtime.committed is True
-    assert manager.telemetry.current_turn_input_audio_ms() == 0.0
+    assert forced is False
+    assert realtime.committed is False
+    assert realtime.requested is False
+    assert manager.telemetry.current_turn_input_audio_ms() > 0.0
 
 
-def test_handsfree_local_fallback_commits_audio_before_turn_reset(monkeypatch) -> None:
+def test_handsfree_local_fallback_does_not_commit_or_request_response(monkeypatch) -> None:
     manager, _state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
 
     call_order: list[tuple[str, float]] = []
@@ -763,22 +789,17 @@ def test_handsfree_local_fallback_commits_audio_before_turn_reset(monkeypatch) -
     now = time.monotonic()
 
     forced = False
-    for idx in range(18):
+    for idx in range(2):
         forced = manager.maybe_force_server_vad_turn_commit(
             input_level=0.01,
             voice_likelihood=0.05,
             now_monotonic=now + 0.4 + (idx * 0.04),
         )
 
-    assert forced is True
-    assert realtime.committed is True
-    assert realtime.requested is True
-    assert call_order[0][0] == "commit"
-    assert call_order[1][0] == "request"
-    assert call_order[-1][0] == "note_turn"
-    assert call_order[0][1] > 0.0
-    assert call_order[1][1] > 0.0
-    assert call_order[-1][1] > 0.0
+    assert forced is False
+    assert realtime.committed is False
+    assert realtime.requested is False
+    assert call_order == []
 
 
 def test_handsfree_idle_watchdog_clears_stale_server_turn_without_audio(monkeypatch) -> None:
@@ -800,6 +821,76 @@ def test_handsfree_idle_watchdog_clears_stale_server_turn_without_audio(monkeypa
     skipped_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_commit_skipped_small_buffer"]
     assert skipped_logs
     assert skipped_logs[-1]["stale_server_turn_cleared"] is True
+
+
+def test_late_user_transcript_requests_followup_response_when_previous_response_already_finished(monkeypatch) -> None:
+    manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
+
+    manager.start_handsfree()
+    manager.handle_response_done()
+    realtime.requested = False
+
+    manager.handle_user_transcript("ahoj")
+
+    assert realtime.requested is True
+    late_logs = [payload for record_type, payload in state["logs"] if record_type == "late_transcript_response_requested"]
+    assert late_logs
+
+
+def test_late_user_transcript_does_not_request_followup_while_server_response_is_still_active(monkeypatch) -> None:
+    manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
+
+    manager.start_handsfree()
+    manager.handle_response_done()
+    manager._server_response_active = True
+    realtime.requested = False
+
+    manager.handle_user_transcript("ahoj")
+
+    assert realtime.requested is False
+    late_logs = [payload for record_type, payload in state["logs"] if record_type == "late_transcript_response_requested"]
+    assert late_logs == []
+
+
+def test_late_user_transcript_does_not_request_followup_after_server_response_created_event(monkeypatch) -> None:
+    manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
+
+    manager.start_handsfree()
+    manager.handle_response_done()
+    manager.handle_response_created("resp_forensic_123")
+    realtime.requested = False
+
+    manager.handle_user_transcript("ahoj")
+
+    assert realtime.requested is False
+    response_created_logs = [payload for record_type, payload in state["logs"] if record_type == "response_created"]
+    assert response_created_logs
+    assert response_created_logs[-1]["response_id"] == "resp_forensic_123"
+    late_logs = [payload for record_type, payload in state["logs"] if record_type == "late_transcript_response_requested"]
+    assert late_logs == []
+
+
+def test_user_transcript_clears_stale_turn_input_audio_before_next_fallback(monkeypatch) -> None:
+    manager, state, realtime = _build_manager(monkeypatch, aec_mode="degraded_no_aec")
+
+    manager.start_handsfree()
+    manager.note_input_audio_appended(4800)
+    manager.handle_response_done()
+    manager.handle_user_transcript("ahoj")
+
+    assert manager.telemetry.current_turn_input_audio_ms() == 0.0
+
+    now = time.monotonic()
+    manager.telemetry.last_server_activity_at = now - 5.0
+    manager.voice_gate_runtime.local_turn_active = True
+    manager.voice_gate_runtime.speech_started_at = now - 7.0
+    manager.voice_gate_runtime.last_voice_activity_at = now - 4.5
+    forced = manager.maybe_force_server_vad_idle_watchdog(now_monotonic=now)
+
+    assert forced is False
+    assert realtime.committed is False
+    skipped_logs = [payload for record_type, payload in state["logs"] if record_type == "speech_commit_skipped_small_buffer"]
+    assert skipped_logs
 
 
 def test_handsfree_restart_after_failed_state_resets_to_idle_first(monkeypatch) -> None:

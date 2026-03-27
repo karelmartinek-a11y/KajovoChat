@@ -11,6 +11,7 @@ from kajovochat.main import (
     ConversationWorker,
     run_audio_guard_selftest,
 )
+from kajovochat.audio.selftest import evaluate_audio_preflight
 from kajovochat.audio.voice_gate import should_drop_mic_chunk
 from kajovochat.audio.session_state import SessionState
 from kajovochat.settings import AppSettings, DEFAULT_AUDIO_GUARD_PROFILE
@@ -130,6 +131,11 @@ def test_audio_guard_selftest_reports_all_checks(monkeypatch) -> None:
                     "barge_in_min_input_level": 0.07,
                     "barge_in_output_ratio": 1.42,
                 },
+                "latency_samples": 320,
+                "preferred_frame_size": 960,
+                "filter_length": 1024,
+                "device_fingerprint": "fp-test",
+                "audio_mode": "notebook_builtin",
             },
         )(),
     )
@@ -137,6 +143,7 @@ def test_audio_guard_selftest_reports_all_checks(monkeypatch) -> None:
     result = run_audio_guard_selftest()
 
     assert result["ok"] is True
+    assert result["startup_ready"] is True
     assert [item["name"] for item in result["checks"]] == ["echo_drop", "voice_pass", "devices_present", "auto_calibration"]
     assert result["profile"]["echo_similarity_drop"] == 0.84
 
@@ -169,6 +176,11 @@ def test_audio_guard_selftest_tolerates_low_similarity_when_bleed_is_clear(monke
                     "barge_in_min_input_level": 0.05,
                     "barge_in_output_ratio": 1.61,
                 },
+                "latency_samples": 320,
+                "preferred_frame_size": 960,
+                "filter_length": 1024,
+                "device_fingerprint": "fp-test",
+                "audio_mode": "notebook_builtin",
             },
         )(),
     )
@@ -179,6 +191,153 @@ def test_audio_guard_selftest_tolerates_low_similarity_when_bleed_is_clear(monke
     auto = result["checks"][-1]
     assert auto["name"] == "auto_calibration"
     assert auto["ok"] is True
+
+
+def test_audio_guard_selftest_requires_latency_for_notebook_builtin_startup(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "kajovochat.main.pick_audio_device",
+        lambda kind, preferred: (2 if kind == "input" else 3, "selected:test"),
+    )
+    monkeypatch.setattr(
+        "kajovochat.main.list_audio_devices",
+        lambda: {"inputs": [{"index": 2, "name": "Mic"}], "outputs": [{"index": 3, "name": "Speaker"}]},
+    )
+    monkeypatch.setattr(
+        "kajovochat.main.calibrate_audio_devices_advanced",
+        lambda **kwargs: type(
+            "Calibration",
+            (),
+            {
+                "playback_rms": 0.0287,
+                "ambient_rms": 0.0082,
+                "bleed_ratio": 4.38,
+                "similarity": 0.323,
+                "notes": ["passes=4", "ambient_med=0.0082", "playback_med=0.0187", "bleed_peak=4.38", "similarity_peak=0.323", "latency_med=0"],
+                "recommended_profile": {
+                    "server_vad_threshold": 0.737,
+                    "playback_activity_level": 0.028,
+                    "echo_similarity_drop": 0.825,
+                    "echo_similarity_soft": 0.63,
+                    "barge_in_min_input_level": 0.056,
+                    "barge_in_output_ratio": 1.543,
+                },
+                "latency_samples": 0,
+                "preferred_frame_size": 960,
+                "filter_length": 256,
+                "device_fingerprint": "fp-test",
+                "audio_mode": "notebook_builtin",
+            },
+        )(),
+    )
+
+    result = run_audio_guard_selftest()
+
+    assert result["ok"] is False
+    assert result["startup_ready"] is False
+    auto = result["checks"][-1]
+    assert auto["name"] == "auto_calibration"
+    assert auto["ok"] is False
+    assert auto["non_blocking"] is False
+
+
+def test_audio_guard_selftest_allows_latencyless_headset_calibration(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "kajovochat.main.pick_audio_device",
+        lambda kind, preferred: (2 if kind == "input" else 3, "selected:test"),
+    )
+    monkeypatch.setattr(
+        "kajovochat.main.list_audio_devices",
+        lambda: {"inputs": [{"index": 2, "name": "Mic"}], "outputs": [{"index": 3, "name": "Speaker"}]},
+    )
+    monkeypatch.setattr(
+        "kajovochat.main.calibrate_audio_devices_advanced",
+        lambda **kwargs: type(
+            "Calibration",
+            (),
+            {
+                "playback_rms": 0.0287,
+                "ambient_rms": 0.0082,
+                "bleed_ratio": 4.38,
+                "similarity": 0.323,
+                "notes": ["headset"],
+                "recommended_profile": {
+                    "server_vad_threshold": 0.737,
+                    "playback_activity_level": 0.028,
+                    "echo_similarity_drop": 0.825,
+                    "echo_similarity_soft": 0.63,
+                    "barge_in_min_input_level": 0.056,
+                    "barge_in_output_ratio": 1.543,
+                },
+                "latency_samples": 0,
+                "preferred_frame_size": 960,
+                "filter_length": 256,
+                "device_fingerprint": "fp-test",
+                "audio_mode": "wired_headset",
+            },
+        )(),
+    )
+
+    result = run_audio_guard_selftest()
+
+    assert result["ok"] is True
+    assert result["startup_ready"] is True
+    auto = result["checks"][-1]
+    assert auto["ok"] is True
+    assert auto["non_blocking"] is True
+
+
+def test_audio_preflight_requests_recalibration_after_echo_heavy_session() -> None:
+    should_run, reason = evaluate_audio_preflight(
+        calibration={
+            "device_fingerprint": "abc",
+            "profile": {"echo_similarity_drop": 0.84},
+            "latency_samples": 320,
+            "last_guard_state": "echo_heavy",
+            "last_guard_top_reason": "playback_voice_echo",
+            "last_drop_rate": 0.24,
+            "last_monitor_recommendation": "needs_preflight",
+        },
+        current_device_fingerprint="abc",
+    )
+
+    assert should_run is True
+    assert reason == "monitor_requested_preflight"
+
+
+def test_audio_preflight_requests_recalibration_after_playback_voice_lock_session() -> None:
+    should_run, reason = evaluate_audio_preflight(
+        calibration={
+            "device_fingerprint": "abc",
+            "profile": {"echo_similarity_drop": 0.84},
+            "latency_samples": 320,
+            "last_guard_state": "echo_heavy",
+            "last_guard_top_reason": "playback_voice_lock",
+            "last_drop_rate": 0.24,
+            "last_monitor_recommendation": "stable",
+        },
+        current_device_fingerprint="abc",
+    )
+
+    assert should_run is True
+    assert reason == "previous_session_echo_heavy"
+
+
+def test_audio_preflight_accepts_matching_stable_calibration() -> None:
+    should_run, reason = evaluate_audio_preflight(
+        calibration={
+            "device_fingerprint": "abc",
+            "profile": {"echo_similarity_drop": 0.84},
+            "latency_samples": 320,
+            "last_guard_state": "normal",
+            "last_guard_top_reason": "",
+            "last_drop_rate": 0.02,
+            "last_monitor_recommendation": "stable",
+        },
+        current_device_fingerprint="abc",
+    )
+
+    assert should_run is False
+    assert reason == ""
 
 
 def test_advanced_calibration_tries_fallback_samplerates(monkeypatch) -> None:
@@ -219,6 +378,49 @@ def test_advanced_calibration_tries_fallback_samplerates(monkeypatch) -> None:
     assert result.playback_rms > result.ambient_rms
 
 
+def test_advanced_calibration_prefers_positive_latency_over_zero_median(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    def _fake_calibrate(**kwargs):
+        index = calls["count"]
+        calls["count"] += 1
+        latency = 0 if index < 2 else 384
+        similarity = 0.14 if index < 2 else 0.46
+        return type(
+            "Calibration",
+            (),
+            {
+                "input_device": 1,
+                "output_device": 2,
+                "ambient_rms": 0.003,
+                "playback_rms": 0.02,
+                "bleed_ratio": 4.5,
+                "similarity": similarity,
+                "recommended_profile": {
+                    "server_vad_threshold": 0.73,
+                    "playback_activity_level": 0.03,
+                    "echo_similarity_drop": 0.82,
+                    "echo_similarity_soft": 0.62,
+                    "barge_in_min_input_level": 0.05,
+                    "barge_in_output_ratio": 1.4,
+                },
+                "notes": ["ok"],
+                "latency_samples": latency,
+                "preferred_frame_size": 960,
+                "filter_length": 256,
+                "device_fingerprint": "fp",
+                "audio_mode": "notebook_builtin",
+            },
+        )()
+
+    monkeypatch.setattr("kajovochat.audio.devices.calibrate_audio_devices", _fake_calibrate)
+
+    result = calibrate_audio_devices_advanced(input_device=1, output_device=2, samplerate=24000)
+
+    assert result.latency_samples == 384
+    assert result.filter_length >= 1024
+
+
 def test_double_talk_is_not_dropped_when_voice_is_strong() -> None:
     dropped, reason = should_drop_mic_chunk(
         default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
@@ -245,7 +447,7 @@ def test_moderate_playback_bleed_is_dropped_before_barge_in_threshold() -> None:
         guard_active=True,
         playback_active=True,
         similarity=0.38,
-        input_level=0.165,
+        input_level=0.045,
         output_level=0.09,
         residual_level=0.003,
         voice_likelihood=0.366,
@@ -255,6 +457,63 @@ def test_moderate_playback_bleed_is_dropped_before_barge_in_threshold() -> None:
 
     assert dropped is True
     assert reason == "playback_voice_echo"
+
+
+def test_strong_user_voice_is_not_dropped_during_playback_even_with_low_voice_likelihood() -> None:
+    dropped, reason = should_drop_mic_chunk(
+        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=0.38,
+        input_level=0.289,
+        output_level=0.869,
+        residual_level=0.0027,
+        voice_likelihood=0.643,
+        double_talk=False,
+        aec_quality=0.18,
+    )
+
+    assert dropped is False
+    assert reason == ""
+
+
+def test_borderline_user_voice_is_not_misclassified_as_playback_lock() -> None:
+    dropped, reason = should_drop_mic_chunk(
+        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=0.31,
+        input_level=0.22,
+        output_level=0.0,
+        residual_level=0.018,
+        voice_likelihood=0.548,
+        double_talk=False,
+        aec_quality=0.12,
+    )
+
+    assert dropped is False
+    assert reason == ""
+
+
+def test_playback_voice_lock_drops_false_voice_when_similarity_and_residual_match_tts_bleed() -> None:
+    dropped, reason = should_drop_mic_chunk(
+        default_profile=DEFAULT_AUDIO_GUARD_PROFILE,
+        mode="handsfree",
+        guard_active=True,
+        playback_active=True,
+        similarity=0.38,
+        input_level=0.07,
+        output_level=0.28,
+        residual_level=0.0069,
+        voice_likelihood=0.66,
+        double_talk=False,
+        aec_quality=0.18,
+    )
+
+    assert dropped is True
+    assert reason == "playback_voice_lock"
 
 
 def test_saved_calibration_matches_by_device_fingerprint() -> None:
@@ -347,6 +606,157 @@ def test_guard_debug_includes_native_aec_probe(monkeypatch) -> None:
 
     assert captured["native_aec_available"] is False
     assert captured["native_aec_reason"] == "Windows System AEC backend není připraven."
+    assert captured["monitor_state"] in {"stable", "learning", "relearning", "needs_preflight"}
+
+
+def test_guard_debug_includes_raw_and_post_gate_levels() -> None:
+    worker = ConversationWorker(AppSettings())
+    captured: dict[str, object] = {}
+    worker.guard_debug_updated.connect(lambda payload: captured.update(payload if isinstance(payload, dict) else {}))
+    worker._last_raw_in_level = 0.314
+    worker._last_post_gate_in_level = 0.128
+    worker._last_out_level = 0.842
+
+    worker._emit_guard_debug()
+
+    assert captured["raw_input_level"] == 0.314
+    assert captured["post_gate_input_level"] == 0.128
+    assert captured["output_level"] == 0.842
+
+
+def test_guard_debug_escalates_to_needs_preflight_for_severe_echo(monkeypatch) -> None:
+    worker = ConversationWorker(AppSettings())
+    captured: dict[str, object] = {}
+    worker.guard_debug_updated.connect(lambda payload: captured.update(payload if isinstance(payload, dict) else {}))
+    worker._guard_learning_until = time.monotonic() + 120.0
+    worker._guard_adaptor._state = "echo_heavy"
+    worker._guard_profile.update(
+        {
+            "echo_similarity_drop": 0.97,
+            "echo_similarity_soft": 0.86,
+        }
+    )
+    for _ in range(140):
+        worker._guard_telemetry.add_sample(
+            input_level=0.18,
+            output_level=0.22,
+            similarity=0.34,
+            voice_likelihood=0.48,
+            dropped=True,
+            playback_active=True,
+            reason="playback_voice_echo",
+            barge_in_candidate=False,
+            residual_level=0.01,
+            aec_quality=0.16,
+            double_talk=False,
+        )
+
+    worker._emit_guard_debug()
+
+    assert captured["monitor_state"] == "needs_preflight"
+    assert captured["recommend_preflight"] is True
+
+
+def test_guard_debug_escalates_to_needs_preflight_for_saturated_echo_with_missing_latency(monkeypatch) -> None:
+    worker = ConversationWorker(AppSettings())
+    captured: dict[str, object] = {}
+    worker.guard_debug_updated.connect(lambda payload: captured.update(payload if isinstance(payload, dict) else {}))
+    worker._guard_learning_until = time.monotonic() + 120.0
+    worker._guard_adaptor._state = "echo_heavy"
+    worker._guard_profile.update(
+        {
+            "echo_similarity_drop": 0.97,
+            "echo_similarity_soft": 0.9,
+            "server_vad_threshold": 0.9,
+            "playback_activity_level": 0.13581,
+        }
+    )
+    worker._guard_calibration["latency_samples"] = 0
+    for _ in range(189):
+        worker._guard_telemetry.add_sample(
+            input_level=0.26,
+            output_level=0.21,
+            similarity=0.328,
+            voice_likelihood=0.537,
+            dropped=True,
+            playback_active=True,
+            reason="playback_voice_echo",
+            barge_in_candidate=True,
+            residual_level=0.021,
+            aec_quality=0.155,
+            double_talk=False,
+        )
+
+    worker._emit_guard_debug()
+
+    assert captured["monitor_state"] == "needs_preflight"
+    assert captured["recommend_preflight"] is True
+
+
+def test_guard_debug_escalates_to_needs_preflight_for_playback_voice_lock(monkeypatch) -> None:
+    worker = ConversationWorker(AppSettings())
+    captured: dict[str, object] = {}
+    worker.guard_debug_updated.connect(lambda payload: captured.update(payload if isinstance(payload, dict) else {}))
+    worker._guard_learning_until = time.monotonic() + 120.0
+    worker._guard_adaptor._state = "echo_heavy"
+    worker._guard_profile.update(
+        {
+            "echo_similarity_drop": 0.97,
+            "echo_similarity_soft": 0.9,
+            "server_vad_threshold": 0.87544,
+            "playback_activity_level": 0.10341,
+        }
+    )
+    worker._guard_calibration["latency_samples"] = 0
+    for _ in range(190):
+        worker._guard_telemetry.add_sample(
+            input_level=0.267,
+            output_level=0.217,
+            similarity=0.324,
+            voice_likelihood=0.593,
+            dropped=True,
+            playback_active=True,
+            reason="playback_voice_lock",
+            barge_in_candidate=True,
+            residual_level=0.0149,
+            aec_quality=0.153,
+            double_talk=False,
+        )
+
+    worker._emit_guard_debug()
+
+    assert captured["monitor_state"] == "needs_preflight"
+    assert captured["recommend_preflight"] is True
+
+
+def test_guard_debug_logs_monitor_snapshot_when_session_logger_is_active() -> None:
+    worker = ConversationWorker(AppSettings())
+    captured: list[dict[str, object]] = []
+
+    class _Logger:
+        last_error = ""
+
+        def append(self, payload):
+            captured.append(payload)
+
+    worker._logger = _Logger()
+    worker._guard_telemetry.add_sample(
+        input_level=0.12,
+        output_level=0.08,
+        similarity=0.31,
+        voice_likelihood=0.44,
+        dropped=True,
+        playback_active=True,
+        reason="playback_voice_echo",
+        barge_in_candidate=False,
+        residual_level=0.02,
+        aec_quality=0.11,
+        double_talk=False,
+    )
+
+    worker._emit_guard_debug()
+
+    assert any(payload.get("type") == "guard_monitor_snapshot" for payload in captured)
 
 
 def test_aec_output_drives_guard_to_drop_pure_echo_but_keep_double_talk() -> None:

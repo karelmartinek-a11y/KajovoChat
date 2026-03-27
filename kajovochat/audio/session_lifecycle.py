@@ -11,6 +11,12 @@ from ..services.log_service import RealtimeLogWriter
 _REALTIME_MODEL = "gpt-realtime"
 _TTS_VOICE = "alloy"
 _TTS_SPEED = 1.0
+_INITIAL_GUARD_LEARNING_S = 180.0
+
+
+def _is_echo_guard_reason(reason: str) -> bool:
+    normalized = str(reason or "").strip().lower()
+    return normalized in {"playback_voice_echo", "playback_voice_lock"}
 
 
 class ConversationAudioLifecycle:
@@ -30,7 +36,7 @@ class ConversationAudioLifecycle:
         owner._session_manager.reset_voice_gate_runtime()
         owner._guard_telemetry = GuardTelemetry()
         owner._aec.reset()
-        owner._guard_learning_until = __import__("time").monotonic() + 30.0
+        owner._guard_learning_until = __import__("time").monotonic() + _INITIAL_GUARD_LEARNING_S
         log_dir = owner.settings.validate_log_dir()
         session_name = datetime.now().strftime("kajovochat_%Y%m%d_%H%M%S")
         owner._logger = RealtimeLogWriter(log_dir=log_dir, session_name=session_name)
@@ -98,10 +104,19 @@ class ConversationAudioLifecycle:
                 f"delay_err={float(aec_summary['avg_delay_error']):.1f}"
             )
         try:
+            monitor_recommendation = "stable"
+            top_reason = str(telemetry.get("top_reason", "") or "")
+            if owner._guard_adaptor.state == "echo_heavy" and _is_echo_guard_reason(top_reason):
+                monitor_recommendation = "needs_preflight"
             owner.settings.audio_guard_profile = owner.settings.normalized_audio_guard_profile() | {
                 key: float(value) for key, value in owner._guard_profile.items() if key in DEFAULT_AUDIO_GUARD_PROFILE
             }
-            owner.settings.audio_guard_calibration = dict(owner._guard_calibration)
+            owner.settings.audio_guard_calibration = dict(owner._guard_calibration) | {
+                "last_guard_state": owner._guard_adaptor.state,
+                "last_guard_top_reason": top_reason,
+                "last_drop_rate": float(telemetry.get("drop_rate", 0.0) or 0.0),
+                "last_monitor_recommendation": monitor_recommendation,
+            }
             owner.settings.save()
         except Exception:
             pass

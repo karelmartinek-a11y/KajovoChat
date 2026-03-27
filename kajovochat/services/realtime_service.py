@@ -76,6 +76,16 @@ class RealtimeService:
         self._assistant_text_buf = ""
         self.last_event_ts = time.monotonic()
 
+    @staticmethod
+    def _is_nonfatal_server_error(message: str) -> bool:
+        """Urci, kdy je serverova chyba bezpecna k ignorovani."""
+        lowered = (message or "").lower()
+        if "buffer too small" in lowered:
+            return True
+        if "active response in progress" in lowered:
+            return True
+        return False
+
     @property
     def is_connected(self) -> bool:
         return self._connected.is_set() and not self._closed.is_set()
@@ -351,7 +361,7 @@ class RealtimeService:
 
         if etype == "error":
             msg = evt.get("error", {}).get("message") or json.dumps(evt, ensure_ascii=False)
-            if self.on_error:
+            if self.on_error and not self._is_nonfatal_server_error(msg):
                 self.on_error(msg)
             return
 

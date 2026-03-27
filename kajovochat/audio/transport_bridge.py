@@ -22,6 +22,7 @@ class RealtimeTransportBridge:
         assistant_audio_sink: Callable[[bytes], None],
         speech_started_sink: Callable[[], None],
         speech_stopped_sink: Callable[[], None],
+        response_created_sink: Callable[[str], None],
         response_done_sink: Callable[[], None],
         activity_sink: Callable[[], None],
         event_log_sink: Callable[[str, dict[str, object]], None],
@@ -45,6 +46,7 @@ class RealtimeTransportBridge:
         self._assistant_audio_sink = assistant_audio_sink
         self._speech_started_sink = speech_started_sink
         self._speech_stopped_sink = speech_stopped_sink
+        self._response_created_sink = response_created_sink
         self._response_done_sink = response_done_sink
         self._activity_sink = activity_sink
         self._event_log_sink = event_log_sink
@@ -168,8 +170,9 @@ class RealtimeTransportBridge:
             if isinstance(item_id, str) and item_id:
                 payload["item_id"] = item_id
             response = evt.get("response")
+            response_id = ""
             if isinstance(response, dict):
-                response_id = response.get("id")
+                response_id = str(response.get("id") or "").strip()
                 if isinstance(response_id, str) and response_id:
                     payload["response_id"] = response_id
             error = evt.get("error")
@@ -177,6 +180,9 @@ class RealtimeTransportBridge:
                 message = error.get("message")
                 if isinstance(message, str) and message:
                     payload["message"] = message
+            if etype == "response.created" and response_id:
+                self._activity_sink()
+                self._response_created_sink(response_id)
             self._event_log_sink("realtime_server_event", payload)
 
         rt.on_status = _status

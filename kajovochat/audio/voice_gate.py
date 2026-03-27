@@ -151,6 +151,42 @@ def _policy_for_capture_gate(name: str) -> VoiceGatePolicy:
         )
     return VoiceGatePolicy(name=normalized or 'standard')
 
+
+def _policy_user_excess_alpha(name: str) -> float:
+    normalized = (name or "standard").strip().lower()
+    if normalized == "degraded_no_aec":
+        return 0.34
+    if normalized == "headset_clean":
+        return 0.22
+    return 0.28
+
+
+def _policy_user_excess_floor(name: str, *, strong: bool) -> float:
+    normalized = (name or "standard").strip().lower()
+    if normalized == "degraded_no_aec":
+        return 0.03 if strong else 0.015
+    if normalized == "headset_clean":
+        return 0.028 if strong else 0.012
+    return 0.04 if strong else 0.02
+
+
+def _policy_voice_likelihood_floor(name: str, *, strong: bool) -> float:
+    normalized = (name or "standard").strip().lower()
+    if normalized == "degraded_no_aec":
+        return 0.68 if strong else 0.64
+    if normalized == "headset_clean":
+        return 0.4 if strong else 0.34
+    return 0.5 if strong else 0.38
+
+
+def _user_excess(
+    *,
+    alpha: float,
+    input_level: float,
+    output_level: float,
+) -> float:
+    return float(input_level) - float(output_level) * float(alpha)
+
 @dataclass
 class VoiceGate:
     """Jediný source of truth pro hlasovou UX politiku session vrstvy."""
@@ -284,19 +320,29 @@ class VoiceGate:
         )
         runtime = self.runtime
         in_tts_hold = bool(now_monotonic < runtime.tts_start_hold_until or now_monotonic < runtime.tts_tail_hold_until)
-        effective_input_level = max(float(input_level), float(voice_likelihood) * 0.45)
+        effective_input_level = float(input_level)
+        user_excess = _user_excess(
+            alpha=_policy_user_excess_alpha(policy.name),
+            input_level=effective_input_level,
+            output_level=output_level,
+        )
         drop_chunk, drop_reason = should_drop_mic_chunk(mode=mode, guard_active=guard_active, playback_active=playback_active, similarity=similarity, input_level=effective_input_level, output_level=output_level, default_profile=default_profile, profile={
             'echo_similarity_drop': thresholds.echo_similarity_drop,
             'echo_similarity_soft': thresholds.echo_similarity_soft,
             'barge_in_min_input_level': thresholds.barge_in_min_input_level,
             'barge_in_output_ratio': thresholds.barge_in_output_ratio,
         }, residual_level=residual_level, voice_likelihood=voice_likelihood, double_talk=double_talk, aec_quality=aec_quality, capture_gate_policy=policy.name)
-        min_voice_likelihood = 0.42
-        if policy.name == "degraded_no_aec":
-            min_voice_likelihood = 0.68
-        elif policy.name == "headset_clean":
-            min_voice_likelihood = 0.34
-        barge_in_candidate = bool(playback_active and voice_likelihood >= min_voice_likelihood and not drop_chunk and effective_input_level >= max(thresholds.barge_in_min_input_level * (0.95 if in_tts_hold else 0.8), float(output_level) * (thresholds.barge_in_output_ratio * (0.88 if in_tts_hold else 0.72))))
+        min_voice_likelihood = _policy_voice_likelihood_floor(policy.name, strong=False if in_tts_hold else False)
+        barge_in_floor = _policy_user_excess_floor(policy.name, strong=False)
+        if in_tts_hold:
+            barge_in_floor = max(barge_in_floor, _policy_user_excess_floor(policy.name, strong=True) * 0.72)
+            min_voice_likelihood = _policy_voice_likelihood_floor(policy.name, strong=True) * 0.88
+        barge_in_candidate = bool(
+            playback_active
+            and voice_likelihood >= min_voice_likelihood
+            and not drop_chunk
+            and user_excess >= barge_in_floor
+        )
         runtime.barge_in_streak = runtime.barge_in_streak + 1 if barge_in_candidate else 0
         required_streak = policy.tts_hold_barge_in_streak if in_tts_hold else policy.base_barge_in_streak
         barge_in_confirmed = bool(barge_in_candidate and runtime.barge_in_streak >= required_streak)
@@ -357,18 +403,53 @@ def should_drop_mic_chunk(*, mode: str, guard_active: bool, playback_active: boo
         min_voice_likelihood = 0.68
     elif policy.name == "headset_clean":
         min_voice_likelihood = 0.34
-    strong_user = bool(input_level >= thresholds.barge_in_min_input_level and input_level >= max(thresholds.barge_in_min_input_level, output_level * thresholds.barge_in_output_ratio))
-    if playback_active and not double_talk and voice_likelihood < min_voice_likelihood and residual <= max(0.02, output_level * 0.2):
+    user_excess = _user_excess(
+        alpha=_policy_user_excess_alpha(policy.name),
+        input_level=input_level,
+        output_level=output_level,
+    )
+    strong_user = bool(
+        input_level >= thresholds.barge_in_min_input_level
+        and voice_likelihood >= _policy_voice_likelihood_floor(policy.name, strong=True)
+        and user_excess >= _policy_user_excess_floor(policy.name, strong=True)
+    )
+    lock_voice_limit = 0.72
+    if policy.name == "degraded_no_aec":
+        lock_voice_limit = 0.8
+    elif policy.name == "headset_clean":
+        lock_voice_limit = 0.5
+    lock_floor = _policy_user_excess_floor(policy.name, strong=False)
+    if playback_active and not double_talk and not strong_user and voice_likelihood < min_voice_likelihood and residual <= max(0.02, output_level * 0.2):
         return True, "playback_voice_echo"
+    if (
+        playback_active
+        and not double_talk
+        and not strong_user
+        and similarity >= max(0.3, thresholds.echo_similarity_soft * 0.45)
+        and residual <= max(0.012, output_level * 0.08)
+        and user_excess <= lock_floor
+        and voice_likelihood < lock_voice_limit
+    ):
+        return True, "playback_voice_lock"
+    if (
+        playback_active
+        and not double_talk
+        and not strong_user
+        and similarity >= max(0.3, thresholds.echo_similarity_soft * 0.45)
+        and residual <= max(0.012, output_level * 0.08)
+        and user_excess <= lock_floor * 0.42
+        and voice_likelihood < _policy_voice_likelihood_floor(policy.name, strong=False)
+    ):
+        return True, "playback_voice_lock"
     if double_talk and (voice_likelihood >= 0.42 or strong_user):
         return False, ""
     if similarity >= thresholds.echo_similarity_drop and not strong_user and residual <= max(0.08, output_level * 1.05):
         return True, "echo_similarity"
     if playback_active and aec_quality < 0.04 and similarity >= max(0.66, thresholds.echo_similarity_soft) and not strong_user and voice_likelihood < 0.5:
         return True, "echo_similarity_fallback"
-    if playback_active and similarity >= thresholds.echo_similarity_soft and residual <= max(0.045, output_level * (0.98 if aec_quality > 0.2 else 1.08)):
+    if playback_active and not strong_user and similarity >= thresholds.echo_similarity_soft and residual <= max(0.045, output_level * (0.98 if aec_quality > 0.2 else 1.08)):
         return True, "echo_residual"
-    if playback_active and aec_quality < 0.05 and output_level >= 0.06 and residual <= 0.022 and voice_likelihood < 0.26:
+    if playback_active and not strong_user and aec_quality < 0.05 and output_level >= 0.06 and residual <= 0.022 and voice_likelihood < 0.26:
         return True, "quiet_bleed"
     return False, ""
 

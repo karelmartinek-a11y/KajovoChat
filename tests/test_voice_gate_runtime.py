@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+from kajovochat.audio.runtime_bindings import ConversationAudioRuntimeBindings
 from kajovochat.audio.voice_gate import (
     VoiceGateRuntimeState,
     can_use_cached_reference,
@@ -266,3 +267,47 @@ def test_headset_clean_policy_disables_echo_drop() -> None:
     assert standard.drop_chunk is True
     assert headset.drop_chunk is False
     assert headset.capture_gate_policy == "headset_clean"
+
+
+def test_resolve_playback_state_ignores_buffer_only_queue() -> None:
+    class _DummySessionManager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[bool, float, float]] = []
+
+        def note_playback_activity(self, *, is_playing_out: bool, now_monotonic: float, trailing_hold_s: float) -> None:
+            self.calls.append((is_playing_out, now_monotonic, trailing_hold_s))
+
+    class _DummyDuplex:
+        def __init__(self, level: float, buffered_bytes: int) -> None:
+            self._level = level
+            self.buffered_bytes = buffered_bytes
+
+        def get_level(self) -> float:
+            return self._level
+
+    class _DummyOwner:
+        def __init__(self, duplex: _DummyDuplex) -> None:
+            self._duplex = duplex
+            self._guard_profile = {"playback_activity_level": 0.035}
+            self.ui_state = "idle"
+            self._session_manager = _DummySessionManager()
+            self._echo_trailing_hold_s = 0.11
+
+        def _active_duplex(self) -> _DummyDuplex:
+            return self._duplex
+
+    owner = _DummyOwner(_DummyDuplex(level=0.0, buffered_bytes=4096))
+    bindings = ConversationAudioRuntimeBindings(
+        owner,
+        closed_pose_factory=lambda: {},
+        state_speaking="speaking",
+        echo_trailing_hold_s=0.18,
+    )
+
+    duplex, current_out_level, is_playing_out = bindings.resolve_playback_state()
+
+    assert duplex is owner._duplex
+    assert current_out_level == 0.0
+    assert is_playing_out is False
+    assert owner._session_manager.calls[-1][0] is False
+    assert owner._session_manager.calls[-1][2] == 0.11

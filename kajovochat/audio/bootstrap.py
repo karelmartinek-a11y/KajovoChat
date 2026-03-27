@@ -81,6 +81,7 @@ def build_conversation_audio_stack(
         assistant_audio_sink=owner._handle_assistant_audio,
         speech_started_sink=owner._handle_speech_started,
         speech_stopped_sink=owner._handle_speech_stopped,
+        response_created_sink=lambda response_id: owner._session_manager.handle_response_created(response_id),
         response_done_sink=owner._handle_response_done,
         log_sink=lambda record_type, extra: owner._log_event(record_type, **(extra if isinstance(extra, dict) else {"value": extra})),
         aec_mode_setter=lambda value: setattr(owner, "_aec_mode", normalize_aec_mode(value)),

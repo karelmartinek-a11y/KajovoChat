@@ -145,6 +145,55 @@ def test_realtime_service_append_audio_reports_send_failure() -> None:
     assert errors == ["socket closed"]
 
 
+def test_realtime_service_ignores_nonfatal_server_errors() -> None:
+    service = RealtimeService(
+        RealtimeConfig(
+            api_key="sk-test-123",
+            model="gpt-realtime",
+            instructions="Test",
+            voice="alloy",
+        )
+    )
+    errors: list[str] = []
+    service.on_error = errors.append
+
+    service._handle_event(
+        {
+            "type": "error",
+            "error": {
+                "message": "Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.",
+            },
+        }
+    )
+    service._handle_event(
+        {
+            "type": "error",
+            "error": {
+                "message": "Conversation already has an active response in progress: resp_test. Wait until the response is finished before creating a new one.",
+            },
+        }
+    )
+
+    assert errors == []
+
+
+def test_realtime_service_reports_other_server_errors() -> None:
+    service = RealtimeService(
+        RealtimeConfig(
+            api_key="sk-test-123",
+            model="gpt-realtime",
+            instructions="Test",
+            voice="alloy",
+        )
+    )
+    errors: list[str] = []
+    service.on_error = errors.append
+
+    service._handle_event({"type": "error", "error": {"message": "Server exploded"}})
+
+    assert errors == ["Server exploded"]
+
+
 def test_realtime_service_raises_last_handshake_error_after_retry_exhaustion(monkeypatch) -> None:
     class _FakeWebSocketApp:
         def __init__(self, url, header, on_open, on_message, on_error, on_close) -> None:

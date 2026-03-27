@@ -213,6 +213,7 @@ class ScenarioHarness:
             assistant_audio_sink=lambda value: None,
             speech_started_sink=lambda: None,
             speech_stopped_sink=lambda: None,
+            response_created_sink=lambda response_id: None,
             response_done_sink=lambda: None,
             log_sink=lambda record_type, payload: self.state["logs"].append((record_type, payload)),
             aec_mode_setter=lambda value: self.state.__setitem__("aec_mode", value),
