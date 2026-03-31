@@ -35,6 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -e .
+          pip install pytest
 
       - name: Compile
         run: python -m compileall -q kajovochat app_gui.py
@@ -42,4 +43,4 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: pytest -q
+        run: python -m pytest -q

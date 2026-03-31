@@ -244,6 +244,10 @@ def normalize_voice(value: str) -> str:
     return "marin"
 
 
+def normalize_realtime_voice(value: str) -> str:
+    return normalize_voice(value)
+
+
 def normalize_response_length(value: str) -> str:
     normalized = (value or "").strip().lower()
     mapping = {
@@ -412,7 +416,7 @@ def _migrate_response_style(data: dict) -> str:
     return "normální"
 
 
-@dataclass
+@dataclass(init=False)
 class AppSettings:
     answer_language_mode: str = "follow_input"
     fixed_answer_language: str = "cs"
@@ -429,8 +433,47 @@ class AppSettings:
     audio_session_profile: str = DEFAULT_AUDIO_SESSION_PROFILE
     audio_diagnostics_enabled: bool = False
 
-    def __post_init__(self) -> None:
-        self.voice = normalize_voice(self.voice)
+    def __init__(
+        self,
+        answer_language_mode: str = "follow_input",
+        fixed_answer_language: str = "cs",
+        voice: str = "marin",
+        realtime_voice: str | None = None,
+        response_style: str = "normální",
+        response_length: str = "střední",
+        response_formality: str = "neutrální",
+        log_dir: str = str((Path.home() / "Documents" / "ChatbotKajaLogs").resolve()),
+        openai_api_key_masked: str = "",
+        audio_guard_profile: dict[str, float] | None = None,
+        audio_guard_calibration: dict[str, object] | None = None,
+        audio_aec_mode: str = DEFAULT_AUDIO_AEC_MODE,
+        audio_device_mode: str = DEFAULT_AUDIO_DEVICE_MODE,
+        audio_session_profile: str = DEFAULT_AUDIO_SESSION_PROFILE,
+        audio_diagnostics_enabled: bool = False,
+    ) -> None:
+        self.answer_language_mode = answer_language_mode
+        self.fixed_answer_language = fixed_answer_language
+        self.voice = voice
+        self.response_style = response_style
+        self.response_length = response_length
+        self.response_formality = response_formality
+        self.log_dir = log_dir
+        self.openai_api_key_masked = openai_api_key_masked
+        self.audio_guard_profile = (
+            dict(audio_guard_profile) if audio_guard_profile is not None else dict(DEFAULT_AUDIO_GUARD_PROFILE)
+        )
+        self.audio_guard_calibration = dict(audio_guard_calibration) if audio_guard_calibration is not None else {}
+        self.audio_aec_mode = audio_aec_mode
+        self.audio_device_mode = audio_device_mode
+        self.audio_session_profile = audio_session_profile
+        self.audio_diagnostics_enabled = audio_diagnostics_enabled
+        self.__post_init__(realtime_voice=realtime_voice)
+
+    def __post_init__(self, realtime_voice: str | None = None) -> None:
+        if realtime_voice is not None:
+            self.voice = normalize_realtime_voice(realtime_voice)
+        else:
+            self.voice = normalize_voice(self.voice)
         self.response_style = normalize_response_style(self.response_style)
         self.response_length = normalize_response_length(self.response_length)
         self.response_formality = normalize_response_formality(self.response_formality)
@@ -438,6 +481,14 @@ class AppSettings:
         self.audio_device_mode = normalize_audio_device_mode(self.audio_device_mode)
         self.audio_session_profile = normalize_audio_session_profile(self.audio_session_profile)
         self.audio_diagnostics_enabled = bool(self.audio_diagnostics_enabled)
+
+    @property
+    def realtime_voice(self) -> str:
+        return self.voice
+
+    @realtime_voice.setter
+    def realtime_voice(self, value: str) -> None:
+        self.voice = normalize_realtime_voice(value)
 
     @property
     def openai_api_key(self) -> str:
